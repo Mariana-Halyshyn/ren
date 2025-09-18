@@ -1,0 +1,41 @@
+import Foundation
+
+struct House {
+    var rooms: Int?
+    var area: Double
+    var pool: Bool?
+    var type: HouseType
+
+    func describe() {
+        print("\(type) with \(rooms != nil ? "\(rooms!) rooms" : "rooms unknown"), area \(area) m², \(pool != nil ? (pool! ? "has pool" : "no pool") : "pool info missing").")
+    }
+}
+
+enum HouseType: String {
+    case apartment = "Apartment"
+    case detached = "Detached"
+    case semiDetached = "SemiDetached"
+}
+
+func describeHouse(_ house: House) {
+    print("\(house.type) with \(house.rooms != nil ? "\(house.rooms!) rooms" : "rooms unknown"), area \(house.area) m², \(house.pool != nil ? (house.pool! ? "has pool" : "no pool") : "pool info missing").")
+}
+
+let houses = [
+    House(rooms: 3, area: 120.5, pool: true, type: .detached),
+    House(rooms: nil, area: 80.0, pool: nil, type: .apartment),
+    House(rooms: 5, area: 200.0, pool: false, type: .semiDetached)
+]
+
+houses.forEach { describeHouse($0) }
+houses.forEach { $0.describe() }
+
+class Owner {
+    var name: String
+    var house: House
+    init(name: String, house: House) { self.name = name; self.house = house }
+    func describeHouse() { print("\(name) owns:"); house.describe() }
+}
+
+let owner = Owner(name: "Ivan", house: houses[0])
+owner.describeHouse()
