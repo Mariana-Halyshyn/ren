@@ -1,3 +1,96 @@
+import UIKit
+import Foundation
+
+//1 STRUCT
+struct House{
+    var Room: Int?
+    var Square: Double
+    var Pool: Bool?
+    var HouseType: HouseType
+}
+   
+//2 FUNCTION
+
+func describeHouse(house:House) -> String {
+   var result = ""
+    result += " " + String (house.Room ?? 0)
+    result += house.HouseType.rawValue
+    result += " " + String (house.Square)
+    
+    return result
+}
+//3
+
+var house1 = House(Square: 25.0, HouseType: HouseType.apartment)
+house1.Room = 2
+house1.Square =  134.7
+house1.Pool = true
+house1.HouseType = .apartment
+
+var house2 = House(Square: 25.0, HouseType: HouseType.detached)
+house2.Room = 3
+house2.Square = 200
+house2.Pool = true
+house2.HouseType =  .detached
+
+var house3 = House(Square: 25.0, HouseType: HouseType.semiDatached)
+    house3.Room = 3
+    house3.Square = 300
+    house3.Pool =  true
+    house3.HouseType = .semiDatached
+
+var HouseNumber = [house1, house2, house3]
+//let
+//var houses = ["House_1", "House_2"]
+
+//4 CLASS
+class Owner {
+    var Name: String = ""
+    var HouseInfo: House = House(Square: <#Double#>, HouseType: <#HouseType#>)
+    //var describeHouse: House(Room: Int, Square:)
+}
+ 
+var owner1 = Owner ()
+owner1.Name = "Sofia"
+owner1.HouseInfo = house1
+
+var owner2 = Owner ()
+owner2.Name = "Olivia"
+owner2.HouseInfo = house2
+
+var owner3 = Owner ()
+owner3.Name = "Alex"
+owner3.HouseInfo = house3
+
+//5 PERELIC
+enum HouseType: String {
+    case apartment = "Appartment"
+    case detached = "Detached"
+    case semiDatached = "SemiDeatached"
+    
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import Foundation
 
 struct House {
