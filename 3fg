@@ -53,3 +53,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 
 
+
+
+
+ттттттттт
+
+import UIKit
+
+class ViewController: UIViewController {
+
+    @IBOutlet weak var usernameField: UITextField!
+    @IBOutlet weak var passwordField: UITextField!
+
+    @IBAction func loginButtonTapped(_ sender: UIButton) {
+        let username = usernameField.text ?? ""
+        let password = passwordField.text ?? ""
+
+        if username == "admin" && password == "1234" {
+            print("Успішний вхід ")
+            // Тут можна відкрити новий екран
+        } else {
+            print("Невірний логін або пароль ❌")
+        }
+    }
+}
+
