@@ -1,0 +1,37 @@
+//
+//  ContentView.swift
+//  5_lab_H
+//
+//  Created by ІПЗ-31/1 on 23.10.2025.
+//
+
+import SwiftUI
+
+struct ContentView: View {
+    var cosmicMission: String = ""
+    let Metod = "http"
+    var body: some View {
+        ZStack{
+            
+            VStack{
+                //URL
+                
+                func fileData(){
+                    guard let url = URL(string: "https://api.nasa.gov/")
+                    else {}
+                    
+                var request = URLRequest(url:url)
+                request.httpMetod = "GET"}
+                if
+            
+//даних про космічні місії, зображення, погодні умови на Марсі та інші цікаві ресурси.
+    }
+            //SESION
+        let sesion = URLSession.shared
+            
+   
+}
+
+        #Preview {
+            ContentView()
+        }
