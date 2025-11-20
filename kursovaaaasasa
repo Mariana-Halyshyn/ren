@@ -1,0 +1,49 @@
+//
+//  ContentView.swift
+//  K_H
+//
+//  Created by ІПЗ-31/1 on 20.11.2025.
+//
+
+import SwiftUI
+
+struct ContentView: View {
+    @State private var searchButton = false
+    @State private var searchTown: String = ""
+    var body: some View {
+     
+        VStack{
+            
+            VStack{
+                TextField("Search town or city", text: $searchTown)
+                    .padding()
+            }
+            
+            //HStack{Text("Weather").padding}
+            HStack {
+                Image(systemName: "heart")
+                    .imageScale(.large)
+                    .foregroundColor(Color.red)
+                    .foregroundStyle(.tint)
+                    .padding()
+                
+                Button("Search"){
+                    //searchButton.toggle()
+                }
+                
+                .padding()
+                .background(Color(red:1, green:0, blue:0.5))
+                .clipShape(Capsule())
+                .foregroundStyle(.white)
+            }
+         
+            
+            
+        }
+    }
+}
+
+
+#Preview {
+    ContentView()
+}
