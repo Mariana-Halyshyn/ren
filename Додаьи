@@ -1,0 +1,175 @@
+//
+//  FavoritesView.swift
+//  KursovaApp
+//
+//  Created by ІПЗ-31/1 on 10.12.2025.
+//
+
+import SwiftUI
+
+struct FavoritesView: View {
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    @ObservedObject var weatherVM: WeatherViewModel
+    let onCitySelect: (String) -> Void
+    @State private var isEditing: Bool = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HeaderView(isEditing: $isEditing, showEditButton: favoritesVM.shouldShowEditButton)
+                .padding(.top, 50)
+                .padding(.horizontal)
+            
+            if favoritesVM.favoriteCities.isEmpty {
+                Spacer()
+                EmptyStateView()
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(favoritesVM.favoriteCities.indices, id: \.self) { index in
+                            let city = favoritesVM.favoriteCities[index]
+                            CityCardRow(city: city, index: index, isEditing: isEditing, favoritesVM: favoritesVM, onSelect: { onCitySelect(city) })
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                }
+            }
+        }
+        .background(
+            LinearGradient(
+                gradient: Gradient(colors: weatherVM.getBackgroundGradient()),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        )
+        .foregroundColor(.white)
+        .onChange(of: favoritesVM.favoriteCities) { oldValue, newValue in
+            if newValue.isEmpty && isEditing {
+                withAnimation(.spring()) { isEditing = false }
+            }
+        }
+    }
+    
+    private struct EmptyStateView: View {
+        var body: some View {
+            Text("Міста, які ви додасте до улюблених, з'являться тут.")
+                .font(.system(size: 18, weight: .medium))
+                .multilineTextAlignment(.center)
+                .foregroundColor(.white.opacity(0.8))
+                .padding()
+        }
+    }
+    
+    private struct HeaderView: View {
+        @Binding var isEditing: Bool
+        let showEditButton: Bool
+        var body: some View {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Улюблені").font(.system(size: 32, weight: .bold))
+                    Text("Список ваших міст").font(.subheadline).foregroundColor(.white.opacity(0.7))
+                }
+                Spacer()
+                if showEditButton {
+                    Button(action: { withAnimation(.spring()) { isEditing.toggle() } }) {
+                        Text(isEditing ? "Готово" : "Змінити")
+                            .font(.headline)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 12)
+                            .background(Color.white.opacity(0.2))
+                            .cornerRadius(8)
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+            .padding(.bottom, 10)
+        }
+    }
+    
+    private struct CityCardRow: View {
+        let city: String
+        let index: Int
+        let isEditing: Bool
+        @ObservedObject var favoritesVM: FavoritesViewModel
+        let onSelect: () -> Void
+        
+        var body: some View {
+            HStack(spacing: 12) {
+                if isEditing {
+                    Button(action: {
+                        withAnimation(.spring()) {
+                            favoritesVM.removeCity(at: IndexSet(integer: index))
+                        }
+                    }) {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundColor(.red)
+                            .font(.title2)
+                    }
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+                
+                Button(action: { if !isEditing { onSelect() } }) {
+                    HStack {
+                        Text(city).font(.system(size: 20, weight: .medium))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding()
+                    .background(Color.white.opacity(0.15))
+                    .cornerRadius(10)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+}
+
+
+
+
+import Foundation
+import SwiftUI
+import Combine
+
+final class FavoritesViewModel: ObservableObject {
+    @Published private(set) var favoriteCities: [String] = []
+    private let storageKey = "favorites.cities.v1"
+    
+    init() { load() }
+    
+    var shouldShowEditButton: Bool { !favoriteCities.isEmpty }
+    
+    func addCity(_ city: String) {
+        let normalized = city.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        if !favoriteCities.contains(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) {
+            favoriteCities.append(normalized)
+            persist()
+        }
+    }
+    
+    func removeCity(at offsets: IndexSet) {
+        favoriteCities.remove(atOffsets: offsets)
+        persist()
+    }
+    
+    func removeCity(atIndex index: Int) {
+        guard favoriteCities.indices.contains(index) else { return }
+        favoriteCities.remove(at: index)
+        persist()
+    }
+    
+    private func persist() {
+        UserDefaults.standard.set(favoriteCities, forKey: storageKey)
+        UserDefaults.standard.synchronize()
+    }
+    
+    private func load() {
+        if let saved = UserDefaults.standard.stringArray(forKey: storageKey) {
+            favoriteCities = saved
+        }
+    }
+}
