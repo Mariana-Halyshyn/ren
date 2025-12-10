@@ -1,0 +1,1011 @@
+import Foundation
+
+// =================================================================
+// MARK: - 1. СТРУКТУРИ ДЛЯ ПОТОЧНОЇ ПОГОДИ (API /weather)
+// =================================================================
+
+struct GeoCoordinates: Decodable {
+    let lon: Double
+    let lat: Double
+}
+
+struct WindInfo: Decodable {
+    let speed: Double?
+    let deg: Int?
+}
+
+struct CloudInfo: Decodable {
+    let all: Int
+}
+
+struct SysInfo: Decodable {
+    let country: String
+    let sunrise: Int
+    let sunset: Int
+}
+
+struct PrimaryWeather: Decodable {
+    let temp: Double
+    let tempMin: Double
+    let tempMax: Double
+    let humidity: Int
+    let pressure: Int
+    
+    enum CodingKeys: String, CodingKey {
+        case temp, humidity, pressure
+        case tempMin = "temp_min"
+        case tempMax = "temp_max"
+    }
+    
+    var temperatureString: String {
+        return String(format: "%.0f°C", temp)
+    }
+}
+
+struct WeatherDesc: Decodable {
+    let main: String
+    let description: String
+    let icon: String
+    
+    var iconURL: URL? {
+        Constants.iconURL(iconCode: icon)
+    }
+}
+
+struct NowWeatherResponse: Decodable {
+    let coord: GeoCoordinates
+    let weather: [WeatherDesc]
+    let base: String
+    let main: PrimaryWeather
+    let visibility: Int?
+    let wind: WindInfo?
+    let clouds: CloudInfo?
+    let dt: Int
+    let sys: SysInfo
+    let timezone: Int
+    let id: Int
+    let name: String
+    let cod: Int
+}
+
+// =================================================================
+// MARK: - ПРОГНОЗ
+// =================================================================
+
+struct ForecastListResponse: Decodable {
+    let list: [ForecastEntry]
+}
+
+struct ForecastEntry: Decodable {
+    let dt: Int
+    let main: PrimaryWeather
+    let weather: [WeatherDesc]
+    
+    var date: Date { Date(timeIntervalSince1970: TimeInterval(dt)) }
+    
+    var fullDayName: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE"
+        formatter.locale = Locale(identifier: "uk_UA")
+        return formatter.string(from: date).capitalized
+    }
+    
+    var dayOfWeekShort: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        formatter.locale = Locale(identifier: "uk_UA")
+        return formatter.string(from: date).capitalized
+    }
+    
+    var shortDateString: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM"
+        formatter.locale = Locale(identifier: "uk_UA")
+        return formatter.string(from: date)
+    }
+}
+
+
+import Foundation
+
+enum APIError: Error, LocalizedError, Equatable {
+    case invalidURL
+    case cityNotFound
+    case decodingError
+    case noData
+    case other(String)
+    
+    static func == (lhs: APIError, rhs: APIError) -> Bool {
+        switch (lhs, rhs) {
+        case (.invalidURL, .invalidURL), (.cityNotFound, .cityNotFound), (.decodingError, .decodingError), (.noData, .noData):
+            return true
+        case let (.other(l), .other(r)):
+            return l == r
+        default:
+            return false
+        }
+    }
+    
+    var errorDescription: String? {
+        switch self {
+        case .cityNotFound: return "Місто не знайдено. Перевірте назву."
+        case .decodingError: return "Помилка обробки даних сервера."
+        case .invalidURL: return "Некоректний URL запит."
+        case .noData: return "Не отримано даних."
+        case .other(let msg): return "Мережева помилка: \(msg)"
+        }
+    }
+}
+
+
+import Foundation
+
+struct Constants {
+    static let baseURL = "https://api.openweathermap.org/data/2.5/"
+    static let apiKey = "480936d07fc6be7125e719a8597b7135" // ваш ключ
+    static let units = "metric"
+    
+    static func iconURL(iconCode: String) -> URL? {
+        return URL(string: "https://openweathermap.org/img/wn/\(iconCode)@2x.png")
+    }
+}
+
+
+
+
+import Foundation
+import CoreLocation
+
+enum LocationError: Error {
+    case accessDenied
+    case failed
+}
+
+class GeoManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var locationCompletion: ((Result<CLLocationCoordinate2D, LocationError>) -> Void)?
+    
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyReduced
+    }
+    
+    func requestLocation(completion: @escaping (Result<CLLocationCoordinate2D, LocationError>) -> Void) {
+        self.locationCompletion = completion
+        manager.requestWhenInUseAuthorization()
+        if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
+            manager.requestLocation()
+        }
+    }
+    
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .denied, .restricted:
+            locationCompletion?(.failure(.accessDenied))
+            locationCompletion = nil
+        case .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.first else { return }
+        locationCompletion?(.success(location.coordinate))
+        locationCompletion = nil
+        manager.stopUpdatingLocation()
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        locationCompletion?(.failure(.failed))
+        locationCompletion = nil
+    }
+}
+
+
+
+
+import Foundation
+
+class MeteorService {
+    private func fetchData<T: Decodable>(endpoint: String, queryItems: [URLQueryItem], completion: @escaping (Result<T, APIError>) -> Void) {
+        var components = URLComponents(string: Constants.baseURL + endpoint)
+        var baseQueryItems = [
+            URLQueryItem(name: "appid", value: Constants.apiKey),
+            URLQueryItem(name: "units", value: Constants.units),
+            URLQueryItem(name: "lang", value: "uk")
+        ]
+        baseQueryItems.append(contentsOf: queryItems)
+        components?.queryItems = baseQueryItems
+        
+        guard let url = components?.url else {
+            completion(.failure(.invalidURL)); return
+        }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            if let error = error {
+                completion(.failure(.other(error.localizedDescription))); return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                let statusCode = httpResponse.statusCode
+                if statusCode == 404 {
+                    completion(.failure(.cityNotFound)); return
+                } else if statusCode != 200 {
+                    completion(.failure(.other("HTTP Error: \(statusCode)"))); return
+                }
+            }
+            
+            guard let data = data else {
+                completion(.failure(.noData)); return
+            }
+            
+            do {
+                let decoded = try JSONDecoder().decode(T.self, from: data)
+                completion(.success(decoded))
+            } catch {
+                completion(.failure(.decodingError))
+            }
+        }.resume()
+    }
+    
+    // за назвою міста
+    func fetchCurrentWeather(city: String, completion: @escaping (Result<NowWeatherResponse, APIError>) -> Void) {
+        fetchData(endpoint: "weather", queryItems: [URLQueryItem(name: "q", value: city)], completion: completion)
+    }
+    
+    func fetchForecast(city: String, completion: @escaping (Result<ForecastListResponse, APIError>) -> Void) {
+        fetchData(endpoint: "forecast", queryItems: [URLQueryItem(name: "q", value: city)], completion: completion)
+    }
+    
+    // за координатами
+    private func createCoordinateQuery(lat: Double, lon: Double) -> [URLQueryItem] {
+        return [URLQueryItem(name: "lat", value: "\(lat)"), URLQueryItem(name: "lon", value: "\(lon)")]
+    }
+    
+    func fetchCurrentWeather(lat: Double, lon: Double, completion: @escaping (Result<NowWeatherResponse, APIError>) -> Void) {
+        fetchData(endpoint: "weather", queryItems: createCoordinateQuery(lat: lat, lon: lon), completion: completion)
+    }
+    
+    func fetchForecast(lat: Double, lon: Double, completion: @escaping (Result<ForecastListResponse, APIError>) -> Void) {
+        fetchData(endpoint: "forecast", queryItems: createCoordinateQuery(lat: lat, lon: lon), completion: completion)
+    }
+}
+
+
+
+import SwiftUI
+import Combine
+import CoreLocation
+
+final class WeatherViewModel: ObservableObject {
+    @Published var currentWeather: NowWeatherResponse? = nil
+    @Published var forecastItems: [ForecastEntry] = []
+    @Published var dailyForecast: [ForecastEntry] = []
+    @Published var groupedDailyForecast: [Date: [ForecastEntry]] = [:]
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String? = nil
+    
+    private let service = MeteorService()
+    private let geoManager = GeoManager()
+    private var cancellables = Set<AnyCancellable>()
+    
+    // MARK: - Public API used in Views
+    func fetchWeather(city: String?, lat: Double?, lon: Double?) {
+        errorMessage = nil
+        isLoading = true
+        
+        if let lat = lat, let lon = lon {
+            fetchCurrentByCoordinates(lat: lat, lon: lon)
+            fetchForecastByCoordinates(lat: lat, lon: lon)
+        } else if let city = city, !city.isEmpty {
+            fetchCurrentByCity(city: city)
+            fetchForecastByCity(city: city)
+        } else {
+            isLoading = false
+            errorMessage = "Невірні параметри запиту"
+        }
+    }
+    
+    // convenience overload used in Views (they call this)
+    func fetchWeather(city: String, lat: Double?, lon: Double?) {
+        fetchWeather(city: city, lat: lat, lon: lon)
+    }
+    
+    func requestUserLocation() {
+        geoManager.requestLocation { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let coord):
+                    self?.fetchWeather(city: nil, lat: coord.latitude, lon: coord.longitude)
+                case .failure:
+                    self?.fetchWeather(city: "Kyiv", lat: nil, lon: nil)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Private helpers
+    private func fetchCurrentByCity(city: String) {
+        service.fetchCurrentWeather(city: city) { [weak self] res in
+            DispatchQueue.main.async {
+                switch res {
+                case .success(let now):
+                    self?.currentWeather = now
+                    self?.isLoading = false
+                case .failure(let err):
+                    self?.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func fetchForecastByCity(city: String) {
+        service.fetchForecast(city: city) { [weak self] res in
+            DispatchQueue.main.async {
+                switch res {
+                case .success(let list):
+                    self?.processForecast(list.list)
+                    self?.isLoading = false
+                case .failure(let err):
+                    self?.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func fetchCurrentByCoordinates(lat: Double, lon: Double) {
+        service.fetchCurrentWeather(lat: lat, lon: lon) { [weak self] res in
+            DispatchQueue.main.async {
+                switch res {
+                case .success(let now):
+                    self?.currentWeather = now
+                    self?.isLoading = false
+                case .failure(let err):
+                    self?.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func fetchForecastByCoordinates(lat: Double, lon: Double) {
+        service.fetchForecast(lat: lat, lon: lon) { [weak self] res in
+            DispatchQueue.main.async {
+                switch res {
+                case .success(let list):
+                    self?.processForecast(list.list)
+                    self?.isLoading = false
+                case .failure(let err):
+                    self?.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func handleError(_ apiError: APIError) {
+        isLoading = false
+        if let desc = apiError.errorDescription {
+            errorMessage = desc
+        } else {
+            errorMessage = "Сталася помилка"
+        }
+    }
+    
+    private func processForecast(_ items: [ForecastEntry]) {
+        let sorted = items.sorted { $0.dt < $1.dt }
+        forecastItems = sorted
+        
+        var groups: [Date: [ForecastEntry]] = [:]
+        let calendar = Calendar.current
+        for e in sorted {
+            let dayStart = calendar.startOfDay(for: e.date)
+            groups[dayStart, default: []].append(e)
+        }
+        groupedDailyForecast = groups
+        
+        let daily = groups.keys.sorted().compactMap { groups[$0]?.first }
+        dailyForecast = daily
+    }
+    
+    // Повертає масив кольорів для градієнта (Views покликають)
+    func getBackgroundGradient() -> [Color] {
+        guard let temp = currentWeather?.main.temp else {
+            return [Color(red: 0.86, green: 0.95, blue: 0.99), Color(red: 0.75, green: 0.89, blue: 0.97)]
+        }
+        if temp >= 30 {
+            return [Color(red: 0.98, green: 0.6, blue: 0.2), Color(red: 1.0, green: 0.85, blue: 0.5)]
+        } else if temp >= 15 {
+            return [Color(red: 0.2, green: 0.6, blue: 0.85), Color(red: 0.6, green: 0.8, blue: 1.0)]
+        } else if temp >= 5 {
+            return [Color(red: 0.55, green: 0.65, blue: 0.75), Color(red: 0.75, green: 0.82, blue: 0.88)]
+        } else {
+            return [Color(red: 0.2, green: 0.25, blue: 0.5), Color(red: 0.4, green: 0.45, blue: 0.7)]
+        }
+    }
+}
+
+
+
+import Foundation
+import SwiftUI
+import Combine
+
+final class FavoritesViewModel: ObservableObject {
+    @Published private(set) var favoriteCities: [String] = []
+    private let storageKey = "favorites.cities.v1"
+    
+    init() { load() }
+    
+    var shouldShowEditButton: Bool { !favoriteCities.isEmpty }
+    
+    func addCity(_ city: String) {
+        let normalized = city.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        if !favoriteCities.contains(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) {
+            favoriteCities.append(normalized)
+            persist()
+        }
+    }
+    
+    func removeCity(at offsets: IndexSet) {
+        favoriteCities.remove(atOffsets: offsets)
+        persist()
+    }
+    
+    // зручний метод (використовується у Views)
+    func removeCity(at indexSet: IndexSet) {
+        removeCity(at: indexSet)
+    }
+    
+    private func persist() {
+        UserDefaults.standard.set(favoriteCities, forKey: storageKey)
+        UserDefaults.standard.synchronize()
+    }
+    
+    private func load() {
+        if let saved = UserDefaults.standard.stringArray(forKey: storageKey) {
+            favoriteCities = saved
+        }
+    }
+}
+
+
+import SwiftUI
+
+extension UIApplication {
+    func endEditing() {
+        sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+struct GradientPressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .shadow(color: Color.black.opacity(0.25), radius: 6, x: 0, y: 4)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.white.opacity(configuration.isPressed ? 0.18 : 0.28),
+                        Color.white.opacity(configuration.isPressed ? 0.45 : 0.45)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .cornerRadius(12)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .foregroundColor(.white)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+
+import SwiftUI
+
+struct ForecastItemView: View {
+    let item: ForecastEntry
+    
+    var timeString: String {
+        let date = Date(timeIntervalSince1970: TimeInterval(item.dt))
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Text(timeString)
+                .font(.caption)
+            
+            if let url = item.weather.first?.iconURL {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().frame(width: 40, height: 40)
+                    } else {
+                        ProgressView().frame(width: 40, height: 40).tint(.white)
+                    }
+                }
+            }
+            
+            Text(item.main.temperatureString)
+                .font(.headline)
+            
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.2))
+        .foregroundColor(.white)
+        .cornerRadius(10)
+    }
+}
+
+
+import SwiftUI
+
+struct WeatherIcon: View {
+    let url: URL?
+    
+    var body: some View {
+        Group {
+            if let url = url {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().frame(width: 30, height: 30)
+                    } else {
+                        ProgressView().frame(width: 30, height: 30).tint(.white)
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct DetailedForecastRow: View {
+    let item: ForecastEntry
+    
+    var timeString: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "uk_UA")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: item.date)
+    }
+    
+    var body: some View {
+        HStack(spacing: 15) {
+            Text(timeString)
+                .frame(width: 50, alignment: .leading)
+                .bold()
+            
+            WeatherIcon(url: item.weather.first?.iconURL)
+            
+            Text(item.weather.first?.description.capitalized ?? "---")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Text(item.main.temperatureString)
+                .font(.body)
+                .bold()
+                .frame(width: 50, alignment: .trailing)
+        }
+        .padding()
+        .background(Color.black.opacity(0.5))
+        .cornerRadius(10)
+        .foregroundColor(.white)
+    }
+}
+
+
+import SwiftUI
+
+struct DailyForecastItemView: View {
+    let item: ForecastEntry
+    @ObservedObject var viewModel: WeatherViewModel
+    @State private var showingDetail = false
+    
+    var body: some View {
+        Button(action: { showingDetail = true }) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.dayOfWeekShort).font(.title3).bold()
+                    Text(item.shortDateString).font(.body).foregroundColor(.white.opacity(0.8))
+                }
+                .frame(width: 90, alignment: .leading)
+                
+                Spacer()
+                
+                if let url = item.weather.first?.iconURL {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().frame(width: 50, height: 50)
+                        } else {
+                            ProgressView().frame(width: 50, height: 50).tint(.white)
+                        }
+                    }
+                }
+                
+                Spacer()
+                
+                Text(item.main.temperatureString)
+                    .font(.title2).bold().frame(width: 60, alignment: .trailing)
+            }
+            .foregroundColor(.white)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 20)
+            .background(Color.white.opacity(0.15))
+            .cornerRadius(15)
+        }
+        .sheet(isPresented: $showingDetail) {
+            let dateKey = Calendar.current.startOfDay(for: item.date)
+            let itemsForDay = viewModel.groupedDailyForecast[dateKey] ?? []
+            DailyDetailView(dayForecast: itemsForDay, dayName: item.fullDayName)
+        }
+    }
+}
+
+
+import SwiftUI
+
+struct DailyDetailView: View {
+    @Environment(\.dismiss) var dismiss
+    let dayForecast: [ForecastEntry]
+    let dayName: String
+    
+    private var fullDateString: String {
+        guard let first = dayForecast.first else { return "" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMMM yyyy"
+        formatter.locale = Locale(identifier: "uk_UA")
+        return formatter.string(from: first.date)
+    }
+    
+    private func getBackgroundGradient(for item: ForecastEntry?) -> [Color] {
+        guard let weatherData = item else {
+            return [Color(red: 0.1, green: 0.1, blue: 0.2), Color(red: 0.3, green: 0.3, blue: 0.4)]
+        }
+        let mainCondition = weatherData.weather.first?.main ?? "Default"
+        let temp = weatherData.main.temp
+        
+        switch mainCondition {
+        case "Thunderstorm": return [Color(red: 0.3, green: 0.1, blue: 0.4), Color(red: 0.1, green: 0.1, blue: 0.15)]
+        case "Snow": return [Color(red: 0.6, green: 0.7, blue: 0.9), Color(red: 0.85, green: 0.9, blue: 0.95)]
+        case "Rain", "Drizzle": return [Color(red: 0.3, green: 0.4, blue: 0.6), Color(red: 0.4, green: 0.5, blue: 0.7)]
+        default: break
+        }
+        
+        if temp >= 30 { return [Color(red: 0.9, green: 0.5, blue: 0.1), Color(red: 1.0, green: 0.8, blue: 0.4)] }
+        else if temp >= 15 { return [Color(red: 0.2, green: 0.6, blue: 0.85), Color(red: 0.6, green: 0.8, blue: 1.0)] }
+        else if temp >= 5 { return [Color(red: 0.4, green: 0.5, blue: 0.6), Color(red: 0.7, green: 0.75, blue: 0.8)] }
+        else { return [Color(red: 0.2, green: 0.2, blue: 0.5), Color(red: 0.4, green: 0.4, blue: 0.7)] }
+    }
+    
+    var body: some View {
+        ZStack {
+            LinearGradient(gradient: Gradient(colors: getBackgroundGradient(for: dayForecast.first)), startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            VStack(spacing: 0) {
+                CustomHeaderView(dayName: dayName, fullDateString: fullDateString, dismiss: dismiss)
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(dayForecast, id: \.dt) { item in
+                            DetailedForecastRow(item: item)
+                        }
+                    }.padding()
+                }.scrollBounceBehavior(.basedOnSize)
+            }
+            .foregroundColor(.white)
+            .shadow(color: .black.opacity(0.4), radius: 3, x: 0, y: 1)
+        }
+    }
+    
+    private struct CustomHeaderView: View {
+        let dayName: String
+        let fullDateString: String
+        let dismiss: DismissAction
+        
+        var body: some View {
+            VStack(spacing: 5) {
+                HStack {
+                    Spacer()
+                    Button("Закрити") { dismiss() }
+                        .foregroundColor(.white).padding(.trailing, 16)
+                }.padding(.top, 40)
+                Text(dayName).font(.largeTitle).bold()
+                Text("Дата: \(fullDateString)").font(.headline)
+            }.padding(.bottom, 20)
+        }
+    }
+}
+
+
+
+
+import SwiftUI
+
+struct FavoritesView: View {
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    @ObservedObject var weatherVM: WeatherViewModel
+    let onCitySelect: (String) -> Void
+    @State private var isEditing: Bool = false
+    
+    var body: some View {
+        ZStack {
+            LinearGradient(gradient: Gradient(colors: weatherVM.getBackgroundGradient()), startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
+            VStack(spacing: 0) {
+                HeaderView(isEditing: $isEditing, showEditButton: favoritesVM.shouldShowEditButton)
+                if favoritesVM.favoriteCities.isEmpty {
+                    EmptyStateView()
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(favoritesVM.favoriteCities.indices, id: \.self) { index in
+                                let city = favoritesVM.favoriteCities[index]
+                                CityCardRow(city: city, index: index, isEditing: isEditing, favoritesVM: favoritesVM, onSelect: { onCitySelect(city) })
+                            }
+                        }.padding(.horizontal, 16).padding(.top, 10)
+                    }.scrollBounceBehavior(.basedOnSize)
+                }
+            }.foregroundColor(.white)
+        }
+        .onChange(of: favoritesVM.favoriteCities) { oldValue, newValue in
+            if newValue.isEmpty && isEditing {
+                withAnimation(.spring()) { isEditing = false }
+            }
+        }
+    }
+    
+    private struct EmptyStateView: View {
+        var body: some View {
+            Text("Міста, які ви додасте до улюблених, з'являться тут.")
+                .font(.headline).multilineTextAlignment(.center).foregroundColor(.white.opacity(0.8))
+                .padding(.top, 50).padding(.horizontal)
+        }
+    }
+    
+    private struct HeaderView: View {
+        @Binding var isEditing: Bool
+        let showEditButton: Bool
+        var body: some View {
+            HStack {
+                Text("Улюблені").font(.largeTitle).bold()
+                Spacer()
+                if showEditButton {
+                    Button(isEditing ? "Готово" : "Змінити") {
+                        withAnimation(.spring()) { isEditing.toggle() }
+                    }.font(.headline).foregroundColor(.white).transition(.opacity.combined(with: .scale))
+                }
+            }.padding(.top, 50).padding(.horizontal, 16).padding(.bottom, 20).animation(.spring(), value: showEditButton)
+        }
+    }
+    
+    private struct CityCardRow: View {
+        let city: String
+        let index: Int
+        let isEditing: Bool
+        @ObservedObject var favoritesVM: FavoritesViewModel
+        let onSelect: () -> Void
+        
+        var body: some View {
+            HStack(spacing: 15) {
+                if isEditing {
+                    Button(action: {
+                        withAnimation(.spring()) {
+                            favoritesVM.removeCity(at: IndexSet(integer: index))
+                        }
+                    }) {
+                        ZStack {
+                            Circle().fill(Color(white: 0.9).opacity(0.9)).frame(width: 30, height: 30)
+                            Image(systemName: "minus.circle.fill").foregroundColor(.red).font(.title)
+                        }
+                    }.transition(.move(edge: .leading).combined(with: .opacity))
+                }
+                Button(action: {
+                    if !isEditing { onSelect() }
+                }) {
+                    HStack {
+                        Text(city).font(.title2).fontWeight(.medium)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.headline).foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding().frame(maxWidth: .infinity).background(Color.white.opacity(0.15)).cornerRadius(12)
+                }
+            }
+        }
+    }
+}
+
+
+
+import SwiftUI
+
+struct WeatherDetailView: View {
+    @ObservedObject var viewModel: WeatherViewModel
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    @State private var cityInput: String = ""
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(gradient: Gradient(colors: [Color(red: 0.86, green: 0.95, blue: 0.99), Color(red: 0.75, green: 0.89, blue: 0.97)]), startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
+                VStack(spacing: 15) {
+                    SearchPanel(viewModel: viewModel, cityInput: $cityInput)
+                    StatusAndErrorView(viewModel: viewModel)
+                    WeatherScrollView(viewModel: viewModel, favoritesVM: favoritesVM, geometry: geometry)
+                }.foregroundColor(.white).shadow(color: .black.opacity(0.4), radius: 4, y: 2)
+            }
+        }
+        .onAppear {
+            if viewModel.currentWeather == nil {
+                viewModel.requestUserLocation()
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { UIApplication.shared.endEditing() }
+    }
+    
+    private struct SearchPanel: View {
+        @ObservedObject var viewModel: WeatherViewModel
+        @Binding var cityInput: String
+        
+        var body: some View {
+            HStack {
+                TextField("", text: $cityInput, prompt: Text("Введіть назву міста...").foregroundColor(.white))
+                    .padding(10).background(Color.white.opacity(0.35)).cornerRadius(10).foregroundColor(.white).tint(.white)
+                
+                Button("Пошук") {
+                    if !cityInput.isEmpty {
+                        viewModel.fetchWeather(city: cityInput, lat: nil, lon: nil)
+                        UIApplication.shared.endEditing()
+                        cityInput = ""
+                    }
+                }.buttonStyle(GradientPressableButtonStyle())
+            }.padding(.horizontal).padding(.top, 10)
+        }
+    }
+    
+    private struct StatusAndErrorView: View {
+        @ObservedObject var viewModel: WeatherViewModel
+        var body: some View {
+            if viewModel.isLoading {
+                ProgressView("Оновлення даних...").progressViewStyle(CircularProgressViewStyle(tint: .white)).padding(.vertical, 10)
+            } else if let error = viewModel.errorMessage {
+                Text("⚠️ \(error)").foregroundColor(.yellow).padding().background(Color.black.opacity(0.3)).cornerRadius(10)
+            }
+        }
+    }
+    
+    private struct WeatherScrollView: View {
+        @ObservedObject var viewModel: WeatherViewModel
+        @ObservedObject var favoritesVM: FavoritesViewModel
+        let geometry: GeometryProxy
+        
+        var body: some View {
+            ScrollView(.vertical, showsIndicators: false) {
+                if let weather = viewModel.currentWeather {
+                    VStack(spacing: 20) {
+                        MainWeatherInfo(weather: weather, favoritesVM: favoritesVM)
+                        HorizontalForecastSection(viewModel: viewModel)
+                        DailyForecastSection(viewModel: viewModel)
+                    }.padding(.horizontal).padding(.bottom, 30)
+                } else if !viewModel.isLoading && viewModel.errorMessage == nil {
+                    Text("Введіть назву міста, щоб побачити погоду.").font(.headline).foregroundColor(.white.opacity(0.8)).frame(height: geometry.size.height/2)
+                }
+            }.scrollBounceBehavior(.basedOnSize)
+        }
+    }
+    
+    private struct MainWeatherInfo: View {
+        let weather: NowWeatherResponse
+        @ObservedObject var favoritesVM: FavoritesViewModel
+        
+        var body: some View {
+            VStack(spacing: 8) {
+                Text(weather.name).font(.largeTitle).bold()
+                Text(weather.main.temperatureString).font(.system(size: 80, weight: .thin))
+                Text(weather.weather.first?.description.capitalized ?? "").font(.title3).fontWeight(.medium)
+                Button {
+                    favoritesVM.addCity(weather.name)
+                } label: {
+                    Label("Додати до Улюблених", systemImage: "star")
+                }
+                .buttonStyle(GradientPressableButtonStyle())
+                .padding(.top, 10)
+            }.padding(.top, 20)
+        }
+    }
+    
+    private struct HorizontalForecastSection: View {
+        @ObservedObject var viewModel: WeatherViewModel
+        var body: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Погодинний прогноз").font(.title3).bold().padding(.leading)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 20) {
+                        ForEach(viewModel.forecastItems, id: \.dt) { item in
+                            ForecastItemView(item: item)
+                        }
+                    }.padding(.horizontal)
+                }.scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            }.padding(.top, 20)
+        }
+    }
+    
+    private struct DailyForecastSection: View {
+        @ObservedObject var viewModel: WeatherViewModel
+        var body: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Прогноз на 5 днів").font(.title3).bold().padding(.leading)
+                ForEach(viewModel.dailyForecast, id: \.dt) { item in
+                    DailyForecastItemView(item: item, viewModel: viewModel)
+                }
+            }.padding(.top, 20)
+        }
+    }
+}
+
+
+
+import SwiftUI
+
+struct ContentView: View {
+    @StateObject var weatherVM = WeatherViewModel()
+    @StateObject var favoritesVM = FavoritesViewModel()
+    @State private var selectedTab = 0
+    
+    var body: some View {
+        ZStack {
+            LinearGradient(gradient: Gradient(colors: [Color(red: 0.86, green: 0.95, blue: 0.99), Color(red: 0.75, green: 0.89, blue: 0.97)]), startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
+            
+            TabView(selection: $selectedTab) {
+                WeatherDetailView(viewModel: weatherVM, favoritesVM: favoritesVM)
+                    .tabItem { Label("Погода", systemImage: "cloud.sun.fill") }.tag(0)
+                
+                FavoritesView(favoritesVM: favoritesVM, weatherVM: weatherVM, onCitySelect: { selectedCity in
+                    weatherVM.fetchWeather(city: selectedCity, lat: nil, lon: nil)
+                    selectedTab = 0
+                })
+                    .tabItem { Label("Улюблені", systemImage: "list.star") }.tag(1)
+            }
+            .tint(.orange)
+        }
+        .onAppear {
+            if weatherVM.currentWeather == nil {
+                weatherVM.fetchWeather(city: "Kyiv", lat: nil, lon: nil)
+            }
+        }
+    }
+}
+
+
+import SwiftUI
+
+@main
+struct KursovaApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
