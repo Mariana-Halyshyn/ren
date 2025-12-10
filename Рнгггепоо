@@ -1,0 +1,68 @@
+import SwiftUI
+import Combine
+
+final class FavoritesViewModel: ObservableObject {
+    @Published var favoriteCities: [String] = []
+    
+    // Додаємо або видаляємо місто з улюблених
+    func toggleFavorite(city: String) {
+        if let index = favoriteCities.firstIndex(of: city) {
+            favoriteCities.remove(at: index)
+        } else {
+            favoriteCities.append(city)
+        }
+    }
+    
+    func isFavorite(city: String) -> Bool {
+        favoriteCities.contains(city)
+    }
+    
+    func removeCity(at offsets: IndexSet) {
+        favoriteCities.remove(atOffsets: offsets)
+    }
+}
+
+
+
+import SwiftUI
+
+struct FavoritesView: View {
+    @StateObject var vm = FavoritesViewModel()
+    
+    var body: some View {
+        NavigationView {
+            VStack {
+                if vm.favoriteCities.isEmpty {
+                    Spacer()
+                    Text("Улюблені міста відсутні")
+                        .foregroundColor(.gray)
+                        .font(.body)
+                        .multilineTextAlignment(.center)
+                    Spacer()
+                } else {
+                    List {
+                        ForEach(vm.favoriteCities, id: \.self) { city in
+                            HStack {
+                                Text(city)
+                                    .font(.body)
+                                
+                                Spacer()
+                                
+                                Button(action: {
+                                    vm.toggleFavorite(city: city)
+                                }) {
+                                    Image(systemName: vm.isFavorite(city: city) ? "star.fill" : "star")
+                                        .foregroundColor(.yellow)
+                                }
+                                .buttonStyle(BorderlessButtonStyle()) // щоб кнопка працювала всередині List
+                            }
+                        }
+                        .onDelete(perform: vm.removeCity)
+                    }
+                    .listStyle(PlainListStyle())
+                }
+            }
+            .navigationTitle("Улюблені міста")
+        }
+    }
+}
