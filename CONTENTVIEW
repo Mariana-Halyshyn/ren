@@ -1,0 +1,60 @@
+import SwiftUI
+
+struct ContentView: View {
+    @StateObject var weatherVM = WeatherViewModel()
+    @StateObject var favoritesVM = FavoritesViewModel()
+    
+    // контролює, чи відкритий екран Favorites (push)
+    @State private var isFavoritesActive: Bool = false
+
+    var body: some View {
+        NavigationStack {
+            // Головний екран — Погода
+            WeatherDetailView(viewModel: weatherVM, favoritesVM: favoritesVM)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    // Кнопка, що пушить до FavoritesView
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: {
+                            isFavoritesActive = true
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "list.star")
+                                Text("Улюблені")
+                            }
+                        }
+                    }
+                }
+                // Навігаційний лінк, який активується програмно
+                .background(
+                    NavigationLink(
+                        destination:
+                            FavoritesView(
+                                favoritesVM: favoritesVM,
+                                weatherVM: weatherVM,
+                                onCitySelect: { selectedCity in
+                                    // при виборі міста у Favorites — завантажуємо погоду
+                                    weatherVM.fetchWeather(city: selectedCity, lat: nil, lon: nil)
+                                    // повертаємося на екран погоди
+                                    isFavoritesActive = false
+                                }
+                            ),
+                        isActive: $isFavoritesActive
+                    ) {
+                        EmptyView()
+                    }
+                    .hidden()
+                )
+        }
+        .onAppear {
+            // початкове завантаження (залишаю як у тебе)
+            if weatherVM.currentWeather == nil {
+                weatherVM.fetchWeather(city: "Київ", lat: nil, lon: nil)
+            }
+        }
+    }
+}
+
+#Preview {
+    ContentView()
+}
