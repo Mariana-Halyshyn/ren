@@ -1,0 +1,182 @@
+Окей! Я перепишу твій WeatherViewModel.swift так, щоб не було EXC_BAD_ACCESS, усе було безпечне для SwiftUI і підтримувало реальні API виклики. Я також додам [weak self] у всіх замиканнях і оновлення на головному потоці.
+
+Ось повний виправлений код:
+
+//
+//  WeatherViewModel.swift
+//  KursovaApp
+//
+//  Created by ІПЗ-31/1 on 10.12.2025.
+//
+
+import SwiftUI
+import Combine
+import CoreLocation
+
+final class WeatherViewModel: ObservableObject {
+    @Published var currentWeather: NowWeatherResponse? = nil
+    @Published var forecastItems: [ForecastEntry] = []
+    @Published var dailyForecast: [ForecastEntry] = []
+    @Published var groupedDailyForecast: [Date: [ForecastEntry]] = [:]
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String? = nil
+    
+    private let service = MeteorService()
+    private let geoManager = GeoManager()
+    private var cancellables = Set<AnyCancellable>()
+    
+    // MARK: - Public API
+    func fetchWeather(city: String? = nil, lat: Double? = nil, lon: Double? = nil) {
+        errorMessage = nil
+        isLoading = true
+        
+        if let lat = lat, let lon = lon {
+            fetchCurrentByCoordinates(lat: lat, lon: lon)
+            fetchForecastByCoordinates(lat: lat, lon: lon)
+        } else if let city = city, !city.isEmpty {
+            fetchCurrentByCity(city: city)
+            fetchForecastByCity(city: city)
+        } else {
+            isLoading = false
+            errorMessage = "Невірні параметри запиту"
+        }
+    }
+    
+    func requestUserLocation() {
+        geoManager.requestLocation { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let coord):
+                    self?.fetchWeather(lat: coord.latitude, lon: coord.longitude)
+                case .failure:
+                    self?.fetchWeather(city: "Kyiv")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Private Helpers
+    private func fetchCurrentByCity(city: String) {
+        service.fetchCurrentWeather(city: city) { [weak self] result in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.isLoading = false
+                switch result {
+                case .success(let now):
+                    self.currentWeather = now
+                case .failure(let err):
+                    self.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func fetchForecastByCity(city: String) {
+        service.fetchForecast(city: city) { [weak self] result in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.isLoading = false
+                switch result {
+                case .success(let list):
+                    self.processForecast(list.list)
+                case .failure(let err):
+                    self.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func fetchCurrentByCoordinates(lat: Double, lon: Double) {
+        service.fetchCurrentWeather(lat: lat, lon: lon) { [weak self] result in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.isLoading = false
+                switch result {
+                case .success(let now):
+                    self.currentWeather = now
+                case .failure(let err):
+                    self.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func fetchForecastByCoordinates(lat: Double, lon: Double) {
+        service.fetchForecast(lat: lat, lon: lon) { [weak self] result in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.isLoading = false
+                switch result {
+                case .success(let list):
+                    self.processForecast(list.list)
+                case .failure(let err):
+                    self.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func handleError(_ apiError: APIError) {
+        errorMessage = apiError.errorDescription ?? "Сталася помилка"
+    }
+    
+    private func processForecast(_ items: [ForecastEntry]) {
+        let sorted = items.sorted { $0.dt < $1.dt }
+        forecastItems = sorted
+        
+        var groups: [Date: [ForecastEntry]] = [:]
+        let calendar = Calendar.current
+        for e in sorted {
+            let dayStart = calendar.startOfDay(for: e.date)
+            groups[dayStart, default: []].append(e)
+        }
+        groupedDailyForecast = groups
+        
+        let daily = groups.keys.sorted().compactMap { groups[$0]?.first }
+        dailyForecast = daily
+    }
+    
+    // MARK: - UI Helpers
+    func getBackgroundGradient() -> [Color] {
+        guard let temp = currentWeather?.main.temp else {
+            return [Color(red: 0.86, green: 0.95, blue: 0.99),
+                    Color(red: 0.75, green: 0.89, blue: 0.97)]
+        }
+        switch temp {
+        case 30...:
+            return [Color(red: 0.98, green: 0.6, blue: 0.2),
+                    Color(red: 1.0, green: 0.85, blue: 0.5)]
+        case 15..<30:
+            return [Color(red: 0.2, green: 0.6, blue: 0.85),
+                    Color(red: 0.6, green: 0.8, blue: 1.0)]
+        case 5..<15:
+            return [Color(red: 0.55, green: 0.65, blue: 0.75),
+                    Color(red: 0.75, green: 0.82, blue: 0.88)]
+        default:
+            return [Color(red: 0.2, green: 0.25, blue: 0.5),
+                    Color(red: 0.4, green: 0.45, blue: 0.7)]
+        }
+    }
+}
+
+✅ Основні виправлення:
+
+1. [weak self] у всіх замиканнях → захист від EXC_BAD_ACCESS.
+
+
+2. DispatchQueue.main.async → оновлення @Published тільки на головному потоці.
+
+
+3. isLoading = false виставляється в усіх випадках, щоб не зависав індикатор.
+
+
+4. Зручно підтримує як місто, так і координати.
+
+
+
+
+---
+
+Якщо хочеш, я можу ще дати готовий MeteorService.swift і GeoManager.swift, щоб все працювало “з коробки” під твою курсову і не було білого екрану.
+
+Хочеш, щоб я це зробив?
