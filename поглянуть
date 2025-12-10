@@ -1,0 +1,156 @@
+//
+//  WeatherViewModel.swift
+//  KursovaApp
+//
+//  Created by ІПЗ-31/1 on 10.12.2025.
+//
+
+import SwiftUI
+import Combine
+import CoreLocation
+
+final class WeatherViewModel: ObservableObject {
+    @Published var currentWeather: NowWeatherResponse? = nil
+    @Published var forecastItems: [ForecastEntry] = []
+    @Published var dailyForecast: [ForecastEntry] = []
+    @Published var groupedDailyForecast: [Date: [ForecastEntry]] = [:]
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String? = nil
+    
+    private let service = MeteorService()
+    private let geoManager = GeoManager()
+    private var cancellables = Set<AnyCancellable>()
+    
+    // MARK: - Public API used in Views
+    func fetchWeather(city: String?, lat: Double?, lon: Double?) {
+        errorMessage = nil
+        isLoading = true
+        
+        if let lat = lat, let lon = lon {
+            fetchCurrentByCoordinates(lat: lat, lon: lon)
+            fetchForecastByCoordinates(lat: lat, lon: lon)
+        } else if let city = city, !city.isEmpty {
+            fetchCurrentByCity(city: city)
+            fetchForecastByCity(city: city)
+        } else {
+            isLoading = false
+            errorMessage = "Невірні параметри запиту"
+        }
+    }
+    
+    // convenience overload used in Views (they call this)
+    func fetchWeather(city: String, lat: Double?, lon: Double?) {
+        fetchWeather(city: city, lat: lat, lon: lon)
+    }
+    
+    func requestUserLocation() {
+        geoManager.requestLocation { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let coord):
+                    self?.fetchWeather(city: nil, lat: coord.latitude, lon: coord.longitude)
+                case .failure:
+                    self?.fetchWeather(city: "Kyiv", lat: nil, lon: nil)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Private helpers
+    private func fetchCurrentByCity(city: String) {
+        service.fetchCurrentWeather(city: city) { [weak self] res in
+            DispatchQueue.main.async {
+                switch res {
+                case .success(let now):
+                    self?.currentWeather = now
+                    self?.isLoading = false
+                case .failure(let err):
+                    self?.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func fetchForecastByCity(city: String) {
+        service.fetchForecast(city: city) { [weak self] res in
+            DispatchQueue.main.async {
+                switch res {
+                case .success(let list):
+                    self?.processForecast(list.list)
+                    self?.isLoading = false
+                case .failure(let err):
+                    self?.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func fetchCurrentByCoordinates(lat: Double, lon: Double) {
+        service.fetchCurrentWeather(lat: lat, lon: lon) { [weak self] res in
+            DispatchQueue.main.async {
+                switch res {
+                case .success(let now):
+                    self?.currentWeather = now
+                    self?.isLoading = false
+                case .failure(let err):
+                    self?.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func fetchForecastByCoordinates(lat: Double, lon: Double) {
+        service.fetchForecast(lat: lat, lon: lon) { [weak self] res in
+            DispatchQueue.main.async {
+                switch res {
+                case .success(let list):
+                    self?.processForecast(list.list)
+                    self?.isLoading = false
+                case .failure(let err):
+                    self?.handleError(err)
+                }
+            }
+        }
+    }
+    
+    private func handleError(_ apiError: APIError) {
+        isLoading = false
+        if let desc = apiError.errorDescription {
+            errorMessage = desc
+        } else {
+            errorMessage = "Сталася помилка"
+        }
+    }
+    
+    private func processForecast(_ items: [ForecastEntry]) {
+        let sorted = items.sorted { $0.dt < $1.dt }
+        forecastItems = sorted
+        
+        var groups: [Date: [ForecastEntry]] = [:]
+        let calendar = Calendar.current
+        for e in sorted {
+            let dayStart = calendar.startOfDay(for: e.date)
+            groups[dayStart, default: []].append(e)
+        }
+        groupedDailyForecast = groups
+        
+        let daily = groups.keys.sorted().compactMap { groups[$0]?.first }
+        dailyForecast = daily
+    }
+    
+    // Повертає масив кольорів для градієнта (Views покликають)
+    func getBackgroundGradient() -> [Color] {
+        guard let temp = currentWeather?.main.temp else {
+            return [Color(red: 0.86, green: 0.95, blue: 0.99), Color(red: 0.75, green: 0.89, blue: 0.97)]
+        }
+        if temp >= 30 {
+            return [Color(red: 0.98, green: 0.6, blue: 0.2), Color(red: 1.0, green: 0.85, blue: 0.5)]
+        } else if temp >= 15 {
+            return [Color(red: 0.2, green: 0.6, blue: 0.85), Color(red: 0.6, green: 0.8, blue: 1.0)]
+        } else if temp >= 5 {
+            return [Color(red: 0.55, green: 0.65, blue: 0.75), Color(red: 0.75, green: 0.82, blue: 0.88)]
+        } else {
+            return [Color(red: 0.2, green: 0.25, blue: 0.5), Color(red: 0.4, green: 0.45, blue: 0.7)]
+        }
+    }
+}
