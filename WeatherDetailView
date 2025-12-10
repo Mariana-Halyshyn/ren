@@ -30,8 +30,8 @@ struct WeatherDetailView: View {
                 
                 VStack(spacing: 12) {
                     
-                    // -------- Верх: Заголовок + прості кнопки-перемикачі (без анімацій) ----------
-                    HStack(spacing: 12) {
+                    // -------- Верх: Заголовок + бургер-меню ----------
+                    HStack {
                         Text("Погода")
                             .font(.title2)
                             .fontWeight(.semibold)
@@ -39,14 +39,17 @@ struct WeatherDetailView: View {
                         
                         Spacer()
                         
-                        // Дві прості кнопки — стиль “тихий”, без анімацій
-                        HStack(spacing: 8) {
-                            SectionButton(title: "Поточна", isSelected: selectedSection == 0) {
-                                selectedSection = 0
-                            }
-                            SectionButton(title: "Улюблені", isSelected: selectedSection == 1) {
-                                selectedSection = 1
-                            }
+                        // Бургер-меню
+                        Menu {
+                            Button("Поточна") { selectedSection = 0 }
+                            Button("Улюблені") { selectedSection = 1 }
+                        } label: {
+                            Image(systemName: "line.horizontal.3")
+                                .font(.title2)
+                                .foregroundColor(.black)
+                                .padding(8)
+                                .background(Color.white)
+                                .cornerRadius(8)
                         }
                     }
                     .padding(.horizontal)
@@ -112,7 +115,7 @@ struct WeatherDetailView: View {
                                             .font(.headline)
                                             .foregroundColor(.black.opacity(0.7))
                                         
-                                        // кнопка улюблених — синхронізується з моделлю
+                                        // кнопка улюблених — сердечко
                                         Button {
                                             if favoritesVM.favoriteCities.contains(weather.name) {
                                                 if let idx = favoritesVM.favoriteCities.firstIndex(of: weather.name) {
@@ -123,8 +126,8 @@ struct WeatherDetailView: View {
                                             }
                                         } label: {
                                             HStack(spacing: 8) {
-                                                Image(systemName: favoritesVM.favoriteCities.contains(weather.name) ? "star.fill" : "star")
-                                                    .foregroundColor(favoritesVM.favoriteCities.contains(weather.name) ? .yellow : .black)
+                                                Image(systemName: favoritesVM.favoriteCities.contains(weather.name) ? "heart.fill" : "heart")
+                                                    .foregroundColor(favoritesVM.favoriteCities.contains(weather.name) ? .red : .gray)
                                                 Text("Улюблені")
                                                     .foregroundColor(.black)
                                             }
@@ -195,11 +198,11 @@ struct WeatherDetailView: View {
                         VStack(spacing: 12) {
                             if favoritesVM.favoriteCities.isEmpty {
                                 VStack(spacing: 12) {
-                                    Image(systemName: "star")
+                                    Image(systemName: "heart")
                                         .resizable()
                                         .scaledToFit()
                                         .frame(width: 56, height: 56)
-                                        .foregroundColor(.yellow)
+                                        .foregroundColor(.red)
                                     Text("У вас ще немає улюблених міст")
                                         .foregroundColor(.black.opacity(0.7))
                                 }
@@ -292,6 +295,8 @@ private struct SectionButton: View {
         .buttonStyle(PlainButtonStyle())
     }
 }
+
+
 
 
 
