@@ -1,0 +1,72 @@
+//
+//  ContentView.swift
+//  KursovaApp
+//
+//  Created by ІПЗ-31/1 on 10.12.2025.
+//
+
+import SwiftUI
+
+struct ContentView: View {
+    @StateObject var weatherVM = WeatherViewModel()
+    @StateObject var favoritesVM = FavoritesViewModel()
+    @State private var isFavoritesActive: Bool = false
+
+    var body: some View {
+        NavigationStack {
+            // Головний екран — Погода
+            WeatherDetailView(viewModel: weatherVM, favoritesVM: favoritesVM)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: {
+                            isFavoritesActive = true
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "list")
+                                Text("Улюблені")
+                            }
+                        }
+                    }
+                }
+                // Навігаційний лінк, який активується програмно
+                .background(
+                    NavigationLink(
+                        destination:
+                            FavoritesView(
+                                favoritesVM: favoritesVM,
+                                weatherVM: weatherVM,
+                                onCitySelect: { selectedCity in
+                                    // при виборі міста у Favorites — завантажуємо погоду
+                                    weatherVM.fetchWeather(city: selectedCity, lat: nil, lon: nil)
+                                    // повертаємося на екран погоди
+                                    isFavoritesActive = false
+                                },
+                                onToggleSection: { idx in
+                                    // якщо Favorites просить перейти до "Погоди" (0) — закриваємо екран Favorites
+                                    if idx == 0 {
+                                        isFavoritesActive = false
+                                    }
+                                    // якщо idx == 1 — залишаємося у Favorites (або додай логіку за потреби)
+                                }
+                            ),
+                        isActive: $isFavoritesActive
+                    ) {
+                        EmptyView()
+                    }
+                    .hidden()
+                )
+        }
+        .onAppear {
+            // початкове завантаження (залишаю як у тебе)
+            if weatherVM.currentWeather == nil {
+                weatherVM.fetchWeather(city: "Київ", lat: nil, lon: nil)
+            }
+        }
+    }
+}
+
+#Preview {
+    ContentView()
+}
