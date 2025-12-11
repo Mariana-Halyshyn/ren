@@ -1,3 +1,9 @@
+Generic parameter 'C' could not be inferred
+Cannot convert value of type '[ForecastEntry]' to expected argument type 'Binding<C>'
+Invalid component of Swift key path
+
+
+
 import SwiftUI
 
 struct WeatherDetailView: View {
