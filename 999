@@ -1,0 +1,364 @@
+import SwiftUI
+
+struct WeatherDetailView: View {
+    @ObservedObject var viewModel: WeatherViewModel
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    @State private var cityInput: String = ""
+    @State private var selectedSection: Int = 0
+    @State private var forecastItem: String = ""
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(
+                    gradient: Gradient(colors: [Color(red: 0.94, green: 0.98, blue: 1.0),
+                                                Color(red: 0.86, green: 0.95, blue: 0.99)]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 12) {
+                    
+                    // TOP BAR: heart (left), title (center-left), section buttons (right)
+                    HStack(alignment: .center, spacing: 12) {
+                        // HEART button moved to left corner (uses current city if available)
+                        Button(action: {
+                            // toggle favorite for current city (if available)
+                            if let current = viewModel.currentWeather?.name {
+                                if favoritesVM.favoriteCities.contains(current) {
+                                    if let idx = favoritesVM.favoriteCities.firstIndex(of: current) {
+                                        favoritesVM.removeCity(atIndex: idx)
+                                    }
+                                } else {
+                                    favoritesVM.addCity(current)
+                                }
+                            }
+                        }) {
+                            // heart reflects whether current city is in favorites
+                            Image(systemName:
+                                    (viewModel.currentWeather != nil && favoritesVM.favoriteCities.contains(viewModel.currentWeather!.name))
+                                    ? "heart.fill" : "heart")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor((viewModel.currentWeather != nil && favoritesVM.favoriteCities.contains(viewModel.currentWeather!.name)) ? .red : .gray)
+                                .padding(8)
+                                .background(Color.white.opacity(0.9))
+                                .cornerRadius(8)
+                        }
+                        .disabled(viewModel.currentWeather == nil) // disable until a city is loaded
+                        
+                        // Title & subtitle (kept left-ish)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Погода")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.black)
+                            Text("Поточні дані та прогноз")
+                                .font(.caption)
+                                .foregroundColor(.black.opacity(0.6))
+                        }
+                        
+                        Spacer()
+                        
+                        // Section selector (right side) — Поточна / ≡
+                        HStack(spacing: 8) {
+                            SectionButton(title: "Поточна", isSelected: selectedSection == 0) {
+                                selectedSection = 0
+                            }
+                            SectionButton(title: "≡", isSelected: selectedSection == 1) {
+                                selectedSection = 1
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 16)
+                    
+                    // Search Row
+                    HStack(spacing: 10) {
+                        TextField("Введіть назву міста", text: $cityInput)
+                            .padding(10)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                            .foregroundColor(.black)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        
+                        Button("Пошук") {
+                            if !cityInput.isEmpty {
+                                viewModel.fetchWeather(city: cityInput, lat: nil, lon: nil)
+                                UIApplication.shared.endEditing()
+                                cityInput = ""
+                                selectedSection = 0
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                    }
+                    .padding(.horizontal)
+                    
+                    // Status / error
+                    if viewModel.isLoading {
+                        ProgressView("Оновлення даних…")
+                            .padding(.vertical, 6)
+                    } else if let error = viewModel.errorMessage {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                    }
+                    
+                    // Content area (weather or favorites depending on selectedSection)
+                    if selectedSection == 0 {
+                        // WEATHER SCREEN
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(spacing: 16) {
+                                if let weather = viewModel.currentWeather {
+                                    VStack(spacing: 10) {
+                                        Text(weather.name)
+                                            .font(.largeTitle).bold()
+                                            .foregroundColor(.black)
+                                        
+                                        Text("\(Int(weather.main.temp))°C")
+                                            .font(.system(size: 64, weight: .thin))
+                                            .foregroundColor(.black)
+                                        
+                                        Text(weather.weather.first?.description.capitalized ?? "")
+                                            .font(.headline)
+                                            .foregroundColor(.black.opacity(0.7))
+                                        
+                                        // secondary heart button inside card (kept for discoverability)
+                                        Button {
+                                            if favoritesVM.favoriteCities.contains(weather.name) {
+                                                if let idx = favoritesVM.favoriteCities.firstIndex(of: weather.name) {
+                                                    favoritesVM.removeCity(atIndex: idx)
+                                                }
+                                            } else {
+                                                favoritesVM.addCity(weather.name)
+                                            }
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                Image(systemName: favoritesVM.favoriteCities.contains(weather.name) ? "heart.fill" : "heart")
+                                                    .foregroundColor(favoritesVM.favoriteCities.contains(weather.name) ? .red : .gray)
+                                                Text("Вибрані")
+                                                    .foregroundColor(.black)
+                                            }
+                                            .padding(.vertical, 8)
+                                            .padding(.horizontal, 12)
+                                            .background(Color.white)
+                                            .cornerRadius(10)
+                                        }
+                                        .padding(.top, 6)
+                                    }
+                                    .padding()
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                                    .padding(.horizontal)
+                                } else {
+                                    Text("Введіть назву міста")
+                                        .multilineTextAlignment(.center)
+                                        .padding()
+                                        .foregroundColor(.black.opacity(0.7))
+                                        .frame(maxWidth: .infinity)
+                                        .background(Color.white)
+                                        .cornerRadius(12)
+                                        .padding(.horizontal)
+                                }
+                                
+                                // Hourly forecast
+                                if !viewModel.forecastItems.isEmpty {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Погодинний прогноз").font(.headline).foregroundColor(.black)
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 12) {
+                                                ForEach(viewModel.forecastItems, id: \.dt) { item in
+                                                    VStack(spacing: 4) {
+                                                        Text(timeString(for: item))
+                                                            .font(.subheadline)
+                                                            .foregroundColor(.black)
+                                                        
+                                                        if let url = item.weather.first?.iconURL {
+                                                            AsyncImage(url: url) { phase in
+                                                                if let image = phase.image {
+                                                                    image.resizable().scaledToFit().frame(width: 30, height: 30)
+                                                                } else if phase.error != nil {
+                                                                    Image(systemName: "cloud").resizable().scaledToFit().frame(width: 30, height: 30)
+                                                                } else {
+                                                                    ProgressView().frame(width: 30, height: 30)
+                                                                }
+                                                            }
+                                                        } else {
+                                                            Image(systemName: "cloud").resizable().scaledToFit().frame(width: 30, height: 30)
+                                                        }
+                                                        
+                                                        Text("\(Int(item.main.temp))°C")
+                                                            .font(.subheadline)
+                                                            .foregroundColor(.black)
+                                                    }
+                                                    .padding(8)
+                                                    .background(Color.white)
+                                                    .cornerRadius(8)
+                                                }
+                                            }
+                                            .padding(.horizontal)
+                                        }
+                                    }
+                                    .padding(.horizontal)
+                                }
+                                
+                                // Daily forecast
+                                if !viewModel.dailyForecast.isEmpty {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("5-денний прогноз").font(.headline).foregroundColor(.black)
+                                        ForEach(viewModel.dailyForecast, id: \.dt) { item in
+                                            HStack {
+                                                Text(item.dayOfWeekShort)
+                                                    .frame(width: 60, alignment: .leading)
+                                                    .foregroundColor(.black)
+                                                
+                                                if let url = item.weather.first?.iconURL {
+                                                    AsyncImage(url: url) { phase in
+                                                        if let image = phase.image {
+                                                            image.resizable().scaledToFit().frame(width: 30, height: 30)
+                                                        } else if phase.error != nil {
+                                                            Image(systemName: "cloud").resizable().scaledToFit().frame(width: 30, height: 30)
+                                                        } else {
+                                                            ProgressView().frame(width: 30, height: 30)
+                                                        }
+                                                    }
+                                                } else {
+                                                    Image(systemName: "cloud").resizable().scaledToFit().frame(width: 30, height: 30)
+                                                }
+                                                
+                                                Text("\(Int(item.main.temp))°C")
+                                                    .foregroundColor(.black)
+                                                Spacer()
+                                            }
+                                            .padding(.vertical, 6)
+                                            .padding(.horizontal)
+                                            .background(Color.white)
+                                            .cornerRadius(8)
+                                        }
+                                    }
+                                    .padding(.top, 6)
+                                    .padding(.horizontal)
+                                }
+                                
+                                Spacer(minLength: 30)
+                            }
+                            .padding(.top, 8)
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                    } else {
+                        // FAVORITES SCREEN (simple list with delete)
+                        VStack(spacing: 12) {
+                            if favoritesVM.favoriteCities.isEmpty {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "heart")
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 56, height: 56)
+                                        .foregroundColor(.red)
+                                    Text("У вас ще немає вибраних міст")
+                                        .foregroundColor(.black.opacity(0.7))
+                                }
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.white)
+                                .cornerRadius(12)
+                                .padding(.horizontal)
+                            } else {
+                                ScrollView {
+                                    VStack(spacing: 10) {
+                                        ForEach(favoritesVM.favoriteCities.indices, id: \.self) { i in
+                                            let city = favoritesVM.favoriteCities[i]
+                                            HStack {
+                                                Button(action: {
+                                                    viewModel.fetchWeather(city: city, lat: nil, lon: nil)
+                                                    selectedSection = 0
+                                                }) {
+                                                    HStack {
+                                                        VStack(alignment: .leading) {
+                                                            Text(city)
+                                                                .font(.body)
+                                                                .foregroundColor(.black)
+                                                            Text("Натисніть, щоб переглянути")
+                                                                .font(.caption)
+                                                                .foregroundColor(.black.opacity(0.6))
+                                                        }
+                                                        Spacer()
+                                                    }
+                                                    .padding()
+                                                    .background(Color.white)
+                                                    .cornerRadius(8)
+                                                }
+                                                .buttonStyle(PlainButtonStyle())
+                                                
+                                                Button(action: {
+                                                    favoritesVM.removeCity(atIndex: i)
+                                                }) {
+                                                    Image(systemName: "trash")
+                                                        .foregroundColor(.red)
+                                                        .padding(10)
+                                                        .background(Color.white)
+                                                        .cornerRadius(8)
+                                                }
+                                                .buttonStyle(PlainButtonStyle())
+                                            }
+                                            .padding(.horizontal)
+                                        }
+                                        Spacer(minLength: 20)
+                                    }
+                                    .padding(.top, 6)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    
+                } // VStack
+                .padding(.bottom, 8)
+            } // ZStack
+        } // GeometryReader
+        .onAppear {
+            if viewModel.currentWeather == nil {
+                viewModel.requestUserLocation()
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { UIApplication.shared.endEditing() }
+    }
+    
+    // helper: format time from ForecastEntry.date
+    private func timeString(for item: ForecastEntry) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "uk_UA")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: item.date)
+    }
+}
+
+// MARK: - Simple Button used as section selector (visual only)
+private struct SectionButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .background(isSelected ? Color.white : Color.white.opacity(0.6))
+                .foregroundColor(isSelected ? .blue : .black)
+                .cornerRadius(8)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
