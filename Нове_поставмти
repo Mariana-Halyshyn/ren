@@ -1,0 +1,412 @@
+//
+//  WeatherDetailView.swift
+//  KursovaApp
+//
+//  Created by ІПЗ-31/1 on 10.12.2025.
+//  Design-only changes: colors & layout, no variable/method renames
+//
+
+import SwiftUI
+
+struct WeatherDetailView: View {
+    @ObservedObject var viewModel: WeatherViewModel
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    @State private var cityInput: String = ""
+    
+    // локальний стан для перемикача (0 = погода, 1 = улюблені)
+    @State private var selectedSection: Int = 0
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // фон: світліший, чистіший блакитний градієнт
+                LinearGradient(
+                    gradient: Gradient(colors: [Color(red: 0.94, green: 0.98, blue: 1.0),
+                                                Color(red: 0.86, green: 0.95, blue: 0.99)]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 12) {
+                    
+                    // -------- Верх: Заголовок (бургер-меню видалено) ----------
+                    HStack {
+                        Text("Погода")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.black)
+                        
+                        Spacer()
+                        
+                        // Тепер меню перенесено у FavoritesView — тут лишається лише іконка/стиль
+                        Image(systemName: "cloud.sun")
+                            .font(.title2)
+                            .foregroundColor(.black.opacity(0.8))
+                            .padding(8)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 18)
+                    
+                    // -------- Поле пошуку (під кнопками) ----------
+                    HStack(spacing: 10) {
+                        TextField("Введіть назву міста", text: $cityInput)
+                            .padding(10)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                            .foregroundColor(.black)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                            )
+                        
+                        Button("Пошук") {
+                            if !cityInput.isEmpty {
+                                viewModel.fetchWeather(city: cityInput, lat: nil, lon: nil)
+                                UIApplication.shared.endEditing()
+                                cityInput = ""
+                                selectedSection = 0
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                    }
+                    .padding(.horizontal)
+                    
+                    // -------- Статус / Помилка ----------
+                    if viewModel.isLoading {
+                        ProgressView("Оновлення даних…")
+                            .padding(.vertical, 6)
+                    } else if let error = viewModel.errorMessage {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                    }
+                    
+                    // -------- Вміст залежно від вибору ----------
+                    if selectedSection == 0 {
+                        // ПОГОДА (збереже твої підвью як вони є)
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(spacing: 16) {
+                                if let weather = viewModel.currentWeather {
+                                    // основний блок — світлий фон для читабельності
+                                    VStack(spacing: 10) {
+                                        Text(weather.name)
+                                            .font(.largeTitle).bold()
+                                            .foregroundColor(.black)
+                                        Text(weather.main.temperatureString)
+                                            .font(.system(size: 64, weight: .thin))
+                                            .foregroundColor(.black)
+                                        Text(weather.weather.first?.description.capitalized ?? "")
+                                            .font(.headline)
+                                            .foregroundColor(.black.opacity(0.7))
+                                        
+                                        // кнопка улюблених — сердечко
+                                        Button {
+                                            if favoritesVM.favoriteCities.contains(weather.name) {
+                                                if let idx = favoritesVM.favoriteCities.firstIndex(of: weather.name) {
+                                                    favoritesVM.removeCity(atIndex: idx)
+                                                }
+                                            } else {
+                                                favoritesVM.addCity(weather.name)
+                                            }
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                Image(systemName: favoritesVM.favoriteCities.contains(weather.name) ? "heart.fill" : "heart")
+                                                    .foregroundColor(favoritesVM.favoriteCities.contains(weather.name) ? .red : .gray)
+                                                Text("Улюблені")
+                                                    .foregroundColor(.black)
+                                            }
+                                            .padding(.vertical, 8)
+                                            .padding(.horizontal, 12)
+                                            .background(Color.white)
+                                            .cornerRadius(10)
+                                        }
+                                        .padding(.top, 6)
+                                    }
+                                    .padding()
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                                    .padding(.horizontal)
+                                } else {
+                                    // плейсхолдер
+                                    Text("Введіть назву міста або дозвольте доступ до локації")
+                                        .multilineTextAlignment(.center)
+                                        .padding()
+                                        .foregroundColor(.black.opacity(0.7))
+                                        .frame(maxWidth: .infinity)
+                                        .background(Color.white)
+                                        .cornerRadius(12)
+                                        .padding(.horizontal)
+                                }
+                                
+                                // Годинний прогноз
+                                if !viewModel.forecastItems.isEmpty {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Погодинний прогноз").font(.headline).foregroundColor(.black)
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 12) {
+                                                ForEach(viewModel.forecastItems, id: \.dt) { item in
+                                                    ForecastItemView(item: item)
+                                                        .padding(8)
+                                                        .background(Color.white)
+                                                        .cornerRadius(8)
+                                                }
+                                            }
+                                            .padding(.horizontal)
+                                        }
+                                    }
+                                    .padding(.horizontal)
+                                }
+                                
+                                // 5-денний прогноз
+                                if !viewModel.dailyForecast.isEmpty {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Прогноз на 5 днів").font(.headline).foregroundColor(.black)
+                                        ForEach(viewModel.dailyForecast, id: \.dt) { item in
+                                            DailyForecastItemView(item: item, viewModel: viewModel)
+                                                .padding(.vertical, 6)
+                                                .padding(.horizontal)
+                                                .background(Color.white)
+                                                .cornerRadius(8)
+                                        }
+                                    }
+                                    .padding(.top, 6)
+                                }
+                                
+                                Spacer(minLength: 30)
+                            }
+                            .padding(.top, 8)
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                    } else {
+                        // УЛЮБЛЕНІ — тепер використовуємо централізований FavoritesView
+                        FavoritesView(
+                            favoritesVM: favoritesVM,
+                            weatherVM: viewModel,
+                            onCitySelect: { city in
+                                viewModel.fetchWeather(city: city, lat: nil, lon: nil)
+                                // повертаємось до секції Погода
+                                selectedSection = 0
+                            },
+                            onToggleSection: { idx in
+                                selectedSection = idx
+                            }
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    
+                } // VStack
+                .padding(.bottom, 8)
+            } // ZStack
+        } // GeometryReader
+        .onAppear {
+            if viewModel.currentWeather == nil {
+                viewModel.requestUserLocation()
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { UIApplication.shared.endEditing() }
+    }
+}
+
+// MARK: - Simple Button used as section selector (visual only)
+private struct SectionButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .background(isSelected ? Color.white : Color.white.opacity(0.6))
+                .foregroundColor(isSelected ? .blue : .black)
+                .cornerRadius(8)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+
+
+
+//
+//  FavoritesView.swift
+//  KursovaApp
+//
+//  Updated: 2025 - дизайн і логіка видалення (без змін методів)
+//  Додано: меню/перемикач секцій (було переміщено з WeatherDetailView)
+//
+
+import SwiftUI
+
+struct FavoritesView: View {
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    @ObservedObject var weatherVM: WeatherViewModel
+    let onCitySelect: (String) -> Void
+    // Додано: опціональний колбек для переключення секцій у батьківському View (0 = Погода, 1 = Улюблені)
+    let onToggleSection: ((Int) -> Void)?
+    @State private var isEditing: Bool = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Улюблені").font(.system(size: 30, weight: .bold))
+                    Text("Ваші збережені міста").font(.subheadline).foregroundColor(.white.opacity(0.8))
+                }
+                Spacer()
+                
+                // Тут додано меню, яке реалізує функції бургер-меню (перемикання секцій)
+                Menu {
+                    Button("Поточна") {
+                        onToggleSection?(0)
+                    }
+                    Button("Улюблені") {
+                        onToggleSection?(1)
+                    }
+                } label: {
+                    Image(systemName: "line.horizontal.3")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                        .padding(8)
+                        .background(Color.white.opacity(0.12))
+                        .cornerRadius(8)
+                }
+                
+                if favoritesVM.shouldShowEditButton {
+                    Button(action: { withAnimation(.none) { isEditing.toggle() } }) {
+                        Text(isEditing ? "Готово" : "Редагувати")
+                            .font(.headline)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 12)
+                            .background(Color.white.opacity(0.18))
+                            .cornerRadius(8)
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+            .padding(.top, 50)
+            .padding(.horizontal)
+            .padding(.bottom, 6)
+            
+            // Content
+            if favoritesVM.favoriteCities.isEmpty {
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: "star")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 60, height: 60)
+                        .foregroundColor(.yellow)
+                    Text("Улюблені міста відсутні")
+                        .foregroundColor(.white.opacity(0.85))
+                        .font(.body)
+                }
+                .padding()
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(favoritesVM.favoriteCities.indices, id: \.self) { index in
+                            let city = favoritesVM.favoriteCities[index]
+                            CityCardRow(
+                                city: city,
+                                index: index,
+                                isEditing: isEditing,
+                                favoritesVM: favoritesVM,
+                                onSelect: { onCitySelect(city) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .padding(.bottom, 20)
+                }
+            }
+        }
+        .background(
+            LinearGradient(
+                gradient: Gradient(colors: weatherVM.getBackgroundGradient()),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        )
+        .foregroundColor(.white)
+        .onChange(of: favoritesVM.favoriteCities) { _, newValue in
+            if newValue.isEmpty && isEditing {
+                // повертаємо режим редагування в off без анімації
+                withAnimation(.none) { isEditing = false }
+            }
+        }
+    }
+    
+    // MARK: - City row (redesigned deletion UI)
+    private struct CityCardRow: View {
+        let city: String
+        let index: Int
+        let isEditing: Bool
+        @ObservedObject var favoritesVM: FavoritesViewModel
+        let onSelect: () -> Void
+        
+        var body: some View {
+            HStack(spacing: 12) {
+                // Main tappable area (city name)
+                Button(action: {
+                    if !isEditing { onSelect() }
+                }) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(city)
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.white)
+                            Text("Натисніть, щоб переглянути")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.75))
+                        }
+                        Spacer()
+                    }
+                    .padding(14)
+                    .background(Color.white.opacity(0.12))
+                    .cornerRadius(10)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                // Delete button appears only in editing mode — plain, compact, без кружечків
+                if isEditing {
+                    Button(action: {
+                        // Викликаємо існуючий метод видалення (API expects IndexSet)
+                        favoritesVM.removeCity(at: IndexSet(integer: index))
+                    }) {
+                        Text("Видалити")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .background(Color.red.opacity(0.85))
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.vertical, 4)
+            .animation(.none, value: isEditing) // без анімацій
+        }
+    }
+}
+
