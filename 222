@@ -1,0 +1,256 @@
+import SwiftUI
+import Combine
+
+// MARK: - MODEL
+struct NasaPhoto: Identifiable, Codable {
+    let id = UUID()
+    let title: String
+    let date: String
+    let url: String
+    let explanation: String
+}
+
+// MARK: - APP SETTINGS
+class AppSettings: ObservableObject {
+    static let shared = AppSettings()
+    
+    @Published var primaryColorName: String {
+        didSet {
+            UserDefaults.standard.set(primaryColorName, forKey: "primaryColorName")
+        }
+    }
+    
+    @Published var fontSize: Double {
+        didSet {
+            UserDefaults.standard.set(fontSize, forKey: "fontSize")
+        }
+    }
+    
+    private init() {
+        self.primaryColorName = UserDefaults.standard.string(forKey: "primaryColorName") ?? "Blue"
+        self.fontSize = UserDefaults.standard.double(forKey: "fontSize")
+        if self.fontSize == 0 { self.fontSize = 1.0 } // дефолт
+    }
+    
+    func color() -> Color {
+        switch primaryColorName {
+        case "Red": return .red
+        case "Green": return .green
+        case "Orange": return .orange
+        case "Purple": return .purple
+        default: return .blue
+        }
+    }
+}
+
+// MARK: - DATA LAYER
+class NasaAPI {
+    private let apiKey = "rr9JbFXYaexCBywlf7Dw3zyYDNpUOLn49KWYcwyh"
+    
+    private var cacheURL: URL? {
+        let fileManager = FileManager.default
+        if let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+            return docs.appendingPathComponent("photos_cache.json")
+        }
+        return nil
+    }
+    
+    func fetchPhotos(count: Int = 10, completion: @escaping ([NasaPhoto]) -> Void) {
+        let urlString = "https://api.nasa.gov/planetary/apod?api_key=\(apiKey)&count=\(count)"
+        guard let url = URL(string: urlString) else {
+            completion(loadCachedPhotos())
+            return
+        }
+        
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data else {
+                completion(self.loadCachedPhotos())
+                return
+            }
+            
+            if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                let photos = jsonArray.compactMap { dict -> NasaPhoto? in
+                    guard let title = dict["title"] as? String,
+                          let date = dict["date"] as? String,
+                          let url = dict["url"] as? String,
+                          let explanation = dict["explanation"] as? String else {
+                        return nil
+                    }
+                    return NasaPhoto(title: title, date: date, url: url, explanation: explanation)
+                }
+                self.savePhotosToCache(photos)
+                DispatchQueue.main.async {
+                    completion(photos)
+                }
+            } else {
+                DispatchQueue.main.async {
+                    completion(self.loadCachedPhotos())
+                }
+            }
+        }.resume()
+    }
+    
+    private func savePhotosToCache(_ photos: [NasaPhoto]) {
+        guard let url = cacheURL else { return }
+        if let data = try? JSONEncoder().encode(photos) {
+            try? data.write(to: url)
+        }
+    }
+    
+    func loadCachedPhotos() -> [NasaPhoto] {
+        guard let url = cacheURL, let data = try? Data(contentsOf: url) else { return [] }
+        if let photos = try? JSONDecoder().decode([NasaPhoto].self, from: data) {
+            return photos
+        }
+        return []
+    }
+    
+    func clearCache() {
+        guard let url = cacheURL else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
+// MARK: - VIEWMODEL
+class NasaViewModel: ObservableObject {
+    @Published var photos: [NasaPhoto] = []
+    @Published var isLoading = false
+    
+    private let api = NasaAPI()
+    
+    func loadPhotos() {
+        isLoading = true
+        api.fetchPhotos { [weak self] photos in
+            self?.photos = photos
+            self?.isLoading = false
+        }
+    }
+}
+
+// MARK: - SETTINGS VIEW
+struct SettingsView: View {
+    @ObservedObject var settings = AppSettings.shared
+    @StateObject private var api = NasaAPI()
+    
+    var body: some View {
+        Form {
+            Section(header: Text("Interface Color")) {
+                Picker("Primary Color", selection: $settings.primaryColorName) {
+                    ForEach(["Blue","Red","Green","Orange","Purple"], id: \.self) { color in
+                        Text(color)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            
+            Section(header: Text("Font Size")) {
+                Slider(value: $settings.fontSize, in: 0.8...1.6, step: 0.1) {
+                    Text("Font Size")
+                }
+                Text(String(format: "Current: %.1fx", settings.fontSize))
+                    .font(.subheadline)
+            }
+            
+            Section {
+                Button("Clear Cached Photos") {
+                    api.clearCache()
+                }
+                .foregroundColor(.red)
+            }
+        }
+        .navigationTitle("Settings")
+    }
+}
+
+// MARK: - MAIN VIEW
+struct ContentView: View {
+    @StateObject private var viewModel = NasaViewModel()
+    @ObservedObject private var settings = AppSettings.shared
+    
+    var body: some View {
+        NavigationView {
+            Group {
+                if viewModel.isLoading {
+                    ProgressView("Loading NASA photos...")
+                } else {
+                    List {
+                        ForEach(viewModel.photos) { photo in
+                            NavigationLink {
+                                VStack {
+                                    AsyncImage(url: URL(string: photo.url)) { image in
+                                        image
+                                            .resizable()
+                                            .scaledToFit()
+                                    } placeholder: {
+                                        ProgressView()
+                                    }
+                                    .frame(maxHeight: 300)
+                                    .cornerRadius(10)
+                                    .padding()
+                                    
+                                    Text(photo.title)
+                                        .font(.headline)
+                                        .scaleEffect(settings.fontSize)
+                                        .padding(.top)
+                                        .foregroundColor(settings.color())
+                                    
+                                    Text(photo.date)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                        .padding(.bottom, 5)
+                                    
+                                    ScrollView {
+                                        Text(photo.explanation)
+                                            .padding()
+                                            .scaleEffect(settings.fontSize)
+                                    }
+                                }
+                                .navigationTitle("Details")
+                            } label: {
+                                HStack(spacing: 12) {
+                                    AsyncImage(url: URL(string: photo.url)) { image in
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 60, height: 60)
+                                            .cornerRadius(8)
+                                    } placeholder: {
+                                        Color.gray.opacity(0.3)
+                                            .frame(width: 60, height: 60)
+                                            .cornerRadius(8)
+                                    }
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(photo.title)
+                                            .font(.headline)
+                                            .scaleEffect(settings.fontSize)
+                                            .foregroundColor(settings.color())
+                                        Text(photo.date)
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("NASA Gallery")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(destination: SettingsView()) {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
+            .onAppear {
+                viewModel.loadPhotos()
+            }
+        }
+    }
+}
+
+// MARK: - PREVIEW
+#Preview {
+    ContentView()
+}
