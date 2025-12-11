@@ -1,3 +1,5 @@
+РЕДАГУВАННЯ ВИБРАНИХ!
+
 import SwiftUI
 
 struct WeatherDetailView: View {
