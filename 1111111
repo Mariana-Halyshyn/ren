@@ -1,0 +1,263 @@
+//
+//  WeatherDetailView.swift
+//  KursovaApp
+//
+//  Created by ІПЗ-31/1 on 10.12.2025.
+//
+
+import SwiftUI
+
+struct WeatherDetailView: View {
+    @ObservedObject var viewModel: WeatherViewModel
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    @State private var cityInput: String = ""
+    @State private var selectedSection: Int = 0
+    @State private var forecastItem: String = ""
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(
+                    gradient: Gradient(colors: [Color(red: 0.94, green: 0.98, blue: 1.0),
+                                                Color(red: 0.86, green: 0.95, blue: 0.99)]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("Прогноз погоди")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.black)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 18)
+                    
+                    HStack(spacing: 10) {
+                        TextField("Введіть назву міста", text: $cityInput)
+                            .padding(10)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                            .foregroundColor(.black)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                            )
+                        
+                        Button("Пошук") {
+                            if !cityInput.isEmpty {
+                                viewModel.fetchWeather(city: cityInput, lat: nil, lon: nil)
+                                UIApplication.shared.endEditing()
+                                cityInput = ""
+                                selectedSection = 0
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                    }
+                    .padding(.horizontal)
+                    
+                    if viewModel.isLoading {
+                        ProgressView("Оновлення даних")
+                            .padding(.vertical, 6)
+                    } else if let error = viewModel.errorMessage {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                    }
+                    
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 16) {
+                            // Current weather block
+                            if let weather = viewModel.currentWeather {
+                                VStack(spacing: 10) {
+                                    Text(weather.name)
+                                        .font(.largeTitle).bold()
+                                        .foregroundColor(.black)
+                                    Text("\(weather.main.temp)°C")
+                                        .font(.system(size: 64, weight: .thin))
+                                        .foregroundColor(.black)
+                                    Text(weather.weather.first?.description.capitalized ?? "")
+                                        .font(.headline)
+                                        .foregroundColor(.black.opacity(0.7))
+                                    
+                                    Button {
+                                        if favoritesVM.favoriteCities.contains(weather.name) {
+                                            if let idx = favoritesVM.favoriteCities.firstIndex(of: weather.name) {
+                                                favoritesVM.removeCity(atIndex: idx)
+                                            }
+                                        } else {
+                                            favoritesVM.addCity(weather.name)
+                                        }
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: favoritesVM.favoriteCities.contains(weather.name) ? "heart.fill" : "heart")
+                                                .foregroundColor(favoritesVM.favoriteCities.contains(weather.name) ? .red : .gray)
+                                            Text("Вибрані")
+                                                .foregroundColor(.black)
+                                        }
+                                        .padding(.vertical, 8)
+                                        .padding(.horizontal, 12)
+                                        .background(Color.white)
+                                        .cornerRadius(10)
+                                    }
+                                    .padding(.top, 6)
+                                }
+                                .padding()
+                                .background(Color.white)
+                                .cornerRadius(12)
+                                .padding(.horizontal)
+                            } else {
+                                Text("Введіть назву міста")
+                                    .multilineTextAlignment(.center)
+                                    .padding()
+                                    .foregroundColor(.black.opacity(0.7))
+                                    .frame(maxWidth: .infinity)
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                                    .padding(.horizontal)
+                            }
+                            
+                            // Hourly forecast — correct iteration
+                            if !viewModel.forecastItems.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Погодинний прогноз")
+                                        .font(.headline)
+                                        .foregroundColor(.black)
+                                    
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 12) {
+                                            ForEach(viewModel.forecastItems, id: \.dt) { item in
+                                                VStack(spacing: 4) {
+                                                    // time string
+                                                    Text(timeString(for: item))
+                                                        .font(.subheadline)
+                                                        .foregroundColor(.black)
+                                                    
+                                                    // icon from API if available
+                                                    if let url = item.weather.first?.iconURL {
+                                                        AsyncImage(url: url) { phase in
+                                                            if let image = phase.image {
+                                                                image
+                                                                    .resizable()
+                                                                    .scaledToFit()
+                                                                    .frame(width: 30, height: 30)
+                                                            } else if phase.error != nil {
+                                                                Image(systemName: "cloud")
+                                                                    .resizable()
+                                                                    .scaledToFit()
+                                                                    .frame(width: 30, height: 30)
+                                                            } else {
+                                                                ProgressView()
+                                                                    .frame(width: 30, height: 30)
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Image(systemName: "cloud")
+                                                            .resizable()
+                                                            .scaledToFit()
+                                                            .frame(width: 30, height: 30)
+                                                    }
+                                                    
+                                                    Text("\(Int(item.main.temp))°C")
+                                                        .font(.subheadline)
+                                                        .foregroundColor(.black)
+                                                }
+                                                .padding(8)
+                                                .background(Color.white)
+                                                .cornerRadius(8)
+                                            }
+                                        }
+                                        .padding(.horizontal)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                            
+                            // 5-day forecast
+                            if !viewModel.dailyForecast.isEmpty {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("5-денний прогноз")
+                                        .font(.headline)
+                                        .foregroundColor(.black)
+                                    
+                                    ForEach(viewModel.dailyForecast, id: \.dt) { item in
+                                        HStack {
+                                            Text(item.dayOfWeekShort)
+                                                .frame(width: 60, alignment: .leading)
+                                                .foregroundColor(.black)
+                                            
+                                            if let url = item.weather.first?.iconURL {
+                                                AsyncImage(url: url) { phase in
+                                                    if let image = phase.image {
+                                                        image
+                                                            .resizable()
+                                                            .scaledToFit()
+                                                            .frame(width: 30, height: 30)
+                                                    } else if phase.error != nil {
+                                                        Image(systemName: "cloud")
+                                                            .resizable()
+                                                            .scaledToFit()
+                                                            .frame(width: 30, height: 30)
+                                                    } else {
+                                                        ProgressView()
+                                                            .frame(width: 30, height: 30)
+                                                    }
+                                                }
+                                            } else {
+                                                Image(systemName: "cloud")
+                                                    .resizable()
+                                                    .scaledToFit()
+                                                    .frame(width: 30, height: 30)
+                                            }
+                                            
+                                            Text("\(Int(item.main.temp))°C")
+                                                .foregroundColor(.black)
+                                            
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 6)
+                                        .padding(.horizontal)
+                                        .background(Color.white)
+                                        .cornerRadius(8)
+                                    }
+                                }
+                                .padding(.top, 6)
+                                .padding(.horizontal)
+                            }
+                            
+                            Spacer(minLength: 30)
+                        }
+                        .padding(.top, 8)
+                    }
+                    .padding(.bottom, 8)
+                }
+            }
+            .onAppear {
+                if viewModel.currentWeather == nil {
+                    viewModel.requestUserLocation()
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { UIApplication.shared.endEditing() }
+        }
+    }
+    
+    // helper: format time from ForecastEntry.date
+    private func timeString(for item: ForecastEntry) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "uk_UA")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: item.date)
+    }
+}
