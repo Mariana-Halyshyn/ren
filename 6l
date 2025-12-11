@@ -1,0 +1,339 @@
+import SwiftUI import Combine
+
+// MARK: - MODEL struct NasaPhoto: Identifiable, Codable { let id: UUID let title: String let date: String let url: String let explanation: String
+
+// Custom init so decoding from API (which doesn't provide id) still works
+init(id: UUID = UUID(), title: String, date: String, url: String, explanation: String) {
+    self.id = id
+    self.title = title
+    self.date = date
+    self.url = url
+    self.explanation = explanation
+}
+
+// Codable: decode only the API fields and generate a new UUID
+init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.title = try container.decode(String.self, forKey: .title)
+    self.date = try container.decode(String.self, forKey: .date)
+    self.url = try container.decode(String.self, forKey: .url)
+    self.explanation = try container.decode(String.self, forKey: .explanation)
+    self.id = UUID()
+}
+
+func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(title, forKey: .title)
+    try container.encode(date, forKey: .date)
+    try container.encode(url, forKey: .url)
+    try container.encode(explanation, forKey: .explanation)
+    // we intentionally do not encode `id` (it's regenerated on decode)
+}
+
+private enum CodingKeys: String, CodingKey {
+    case title, date, url, explanation
+}
+
+}
+
+// MARK: - APP SETTINGS (UserDefaults) final class AppSettings: ObservableObject { static let shared = AppSettings()
+
+private var cancellables = Set<AnyCancellable>()
+
+// Keys
+private let keyPrimaryColor = "primaryColor"
+private let keyFontSize = "fontSize"
+
+// Published properties
+@Published var primaryColorName: String
+@Published var fontSize: Double // base font size multiplier
+
+private init() {
+    let defaults = UserDefaults.standard
+    self.primaryColorName = defaults.string(forKey: keyPrimaryColor) ?? "blue"
+    self.fontSize = defaults.double(forKey: keyFontSize)
+    if self.fontSize == 0 { self.fontSize = 1.0 } // default multiplier
+
+    // Save on change
+    $primaryColorName
+        .sink { value in
+            UserDefaults.standard.set(value, forKey: self.keyPrimaryColor)
+        }
+        .store(in: &cancellables)
+
+    $fontSize
+        .sink { value in
+            UserDefaults.standard.set(value, forKey: self.keyFontSize)
+        }
+        .store(in: &cancellables)
+}
+
+func color() -> Color {
+    switch primaryColorName {
+    case "blue": return Color.blue
+    case "green": return Color.green
+    case "red": return Color.red
+    case "purple": return Color.purple
+    case "orange": return Color.orange
+    default: return Color.blue
+    }
+}
+
+}
+
+// MARK: - DATA LAYER with FileManager caching class NasaAPI { private let apiKey = "rr9JbFXYaexCBywlf7Dw3zyYDNpUOLn49KWYcwyh" private let cacheFileName = "photos_cache.json"
+
+private var cacheURL: URL? {
+    do {
+        let docs = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        return docs.appendingPathComponent(cacheFileName)
+    } catch {
+        return nil
+    }
+}
+
+func fetchPhotos(count: Int = 10, completion: @escaping ([NasaPhoto]) -> Void) {
+    let urlString = "https://api.nasa.gov/planetary/apod?api_key=\(apiKey)&count=\(count)"
+    guard let url = URL(string: urlString) else {
+        completion(loadCachedPhotos())
+        return
+    }
+
+    URLSession.shared.dataTask(with: url) { data, response, error in
+        if let data = data,
+           let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            let photos = jsonArray.compactMap { dict -> NasaPhoto? in
+                guard let title = dict["title"] as? String,
+                      let date = dict["date"] as? String,
+                      let url = dict["url"] as? String,
+                      let explanation = dict["explanation"] as? String else {
+                    return nil
+                }
+                return NasaPhoto(title: title, date: date, url: url, explanation: explanation)
+            }
+            // Save to cache
+            self.savePhotosToCache(photos)
+            DispatchQueue.main.async { completion(photos) }
+        } else {
+            // Network failed -> load from cache
+            DispatchQueue.main.async { completion(self.loadCachedPhotos()) }
+        }
+    }.resume()
+}
+
+// Save JSON-encoded photos to a local file
+private func savePhotosToCache(_ photos: [NasaPhoto]) {
+    guard let cacheURL = cacheURL else { return }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .prettyPrinted
+    do {
+        let data = try encoder.encode(photos)
+        try data.write(to: cacheURL, options: [.atomic])
+        // print("Saved cache to \(cacheURL)")
+    } catch {
+        // print("Failed to save cache: \(error)")
+    }
+}
+
+// Load cached photos if present
+func loadCachedPhotos() -> [NasaPhoto] {
+    guard let cacheURL = cacheURL,
+          FileManager.default.fileExists(atPath: cacheURL.path) else {
+        return []
+    }
+    do {
+        let data = try Data(contentsOf: cacheURL)
+        let decoder = JSONDecoder()
+        let photos = try decoder.decode([NasaPhoto].self, from: data)
+        return photos
+    } catch {
+        return []
+    }
+}
+
+}
+
+// MARK: - VIEWMODEL class NasaViewModel: ObservableObject { @Published var photos: [NasaPhoto] = [] @Published var isLoading = false
+
+private let api = NasaAPI()
+
+func loadPhotos() {
+    isLoading = true
+    api.fetchPhotos { [weak self] photos in
+        self?.photos = photos
+        self?.isLoading = false
+    }
+}
+
+func loadCachedPhotos() {
+    photos = api.loadCachedPhotos()
+}
+
+}
+
+// MARK: - SETTINGS VIEW struct SettingsView: View { @ObservedObject var settings = AppSettings.shared
+
+var body: some View {
+    Form {
+        Section(header: Text("Appearance")) {
+            Picker("Primary Color", selection: $settings.primaryColorName) {
+                Text("Blue").tag("blue")
+                Text("Green").tag("green")
+                Text("Red").tag("red")
+                Text("Purple").tag("purple")
+                Text("Orange").tag("orange")
+            }
+            .pickerStyle(.segmented)
+
+            HStack {
+                Text("Font size")
+                Spacer()
+                Slider(value: $settings.fontSize, in: 0.8...1.6, step: 0.05)
+                    .frame(width: 160)
+            }
+            Text("Preview: The quick brown fox jumps over the lazy dog")
+                .font(.system(size: 14 * settings.fontSize))
+                .padding(.top, 6)
+        }
+
+        Section(header: Text("Data")) {
+            Button("Clear cached photos") {
+                clearCache()
+            }
+            .foregroundColor(.red)
+        }
+    }
+    .navigationTitle("Settings")
+}
+
+private func clearCache() {
+    let fm = FileManager.default
+    do {
+        let docs = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let file = docs.appendingPathComponent("photos_cache.json")
+        if fm.fileExists(atPath: file.path) {
+            try fm.removeItem(at: file)
+        }
+    } catch {
+        // ignore
+    }
+}
+
+}
+
+// MARK: - VIEW struct ContentView: View { @StateObject private var viewModel = NasaViewModel() @ObservedObject private var settings = AppSettings.shared @State private var showingSettings = false
+
+var body: some View {
+    NavigationView {
+        Group {
+            if viewModel.isLoading {
+                ProgressView("Loading NASA photos...")
+                    .tint(settings.color())
+            } else {
+                List {
+                    ForEach(viewModel.photos) { photo in
+                        NavigationLink {
+                            VStack {
+                                AsyncImage(url: URL(string: photo.url)) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFit()
+                                    case .failure(_):
+                                        Color.gray.opacity(0.3)
+                                    case .empty:
+                                        ProgressView()
+                                    @unknown default:
+                                        EmptyView()
+                                    }
+                                }
+                                .frame(maxHeight: 300)
+                                .cornerRadius(10)
+                                .padding()
+
+                                Text(photo.title)
+                                    .font(.system(size: 18 * settings.fontSize, weight: .semibold))
+                                    .padding(.top)
+
+                                Text(photo.date)
+                                    .font(.system(size: 12 * settings.fontSize))
+                                    .foregroundColor(.secondary)
+                                    .padding(.bottom, 5)
+
+                                ScrollView {
+                                    Text(photo.explanation)
+                                        .font(.system(size: 14 * settings.fontSize))
+                                        .padding()
+                                }
+                            }
+                            .navigationTitle("Details")
+                            .toolbarBackground(settings.color(), for: .navigationBar)
+                        } label: {
+                            HStack(spacing: 12) {
+                                AsyncImage(url: URL(string: photo.url)) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 60, height: 60)
+                                            .cornerRadius(8)
+                                    default:
+                                        Color.gray.opacity(0.3)
+                                            .frame(width: 60, height: 60)
+                                            .cornerRadius(8)
+                                    }
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(photo.title)
+                                        .font(.system(size: 16 * settings.fontSize, weight: .semibold))
+                                    Text(photo.date)
+                                        .font(.system(size: 12 * settings.fontSize))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .navigationTitle("NASA Gallery")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: viewModel.loadPhotos) {
+                    Label("Reload", systemImage: "arrow.clockwise")
+                }
+                .tint(settings.color())
+            }
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: { showingSettings = true }) {
+                    Label("Settings", systemImage: "gearshape")
+                }
+            }
+        }
+        .sheet(isPresented: $showingSettings) {
+            NavigationView {
+                SettingsView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { showingSettings = false }
+                        }
+                    }
+            }
+        }
+        .onAppear {
+            // Apply saved settings automatically (AppSettings singleton already loaded from UserDefaults)
+            // Try to load cached photos immediately and then fetch fresh ones
+            viewModel.loadCachedPhotos()
+            viewModel.loadPhotos()
+        }
+        .accentColor(settings.color())
+    }
+}
+
+}
+
+#Preview { ContentView() }
