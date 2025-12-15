@@ -1,0 +1,144 @@
+//
+//  FavoritesView.swift
+//  KursovaApp
+//
+
+import SwiftUI
+
+struct FavoritesView: View {
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    @ObservedObject var weatherVM: WeatherViewModel
+    let onCitySelect: (String) -> Void
+ 
+    let onToggleSection: ((Int) -> Void)?
+    @State private var isEditing: Bool = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Улюблені").font(.system(size: 30, weight: .bold))
+                    Text("Ваші збережені міста").font(.subheadline).foregroundColor(.white.opacity(0.8))
+                }
+                Spacer()
+                
+                // Тут додано меню, яке реалізує функції бургер-меню (перемикання секцій)
+               
+                if favoritesVM.shouldShowEditButton {
+                    Button(action: { withAnimation(.none) { isEditing.toggle() } }) {
+                        Text(isEditing ? "Готово" : "Редагувати")
+                            .font(.headline)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 12)
+                            .background(Color.white.opacity(0.18))
+                            .cornerRadius(8)
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+            .padding(.top, 50)
+            .padding(.horizontal)
+            .padding(.bottom, 6)
+            
+            // Content
+            if favoritesVM.favoriteCities.isEmpty {
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: "heart")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 60, height: 60)
+                        .foregroundColor(.yellow)
+                    Text("Улюблені міста відсутні")
+                        .foregroundColor(.white.opacity(0.85))
+                        .font(.body)
+                }
+                .padding()
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(favoritesVM.favoriteCities.indices, id: \.self) { index in
+                            let city = favoritesVM.favoriteCities[index]
+                            CityCardRow(
+                                city: city,
+                                index: index,
+                                isEditing: isEditing,
+                                favoritesVM: favoritesVM,
+                                onSelect: { onCitySelect(city) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .padding(.bottom, 20)
+                }
+            }
+        }
+        .background(
+            LinearGradient(
+                gradient: Gradient(colors: weatherVM.getBackgroundGradient()),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        )
+        .foregroundColor(.white)
+        .onChange(of: favoritesVM.favoriteCities) { _, newValue in
+            if newValue.isEmpty && isEditing {
+                withAnimation(.none) { isEditing = false }
+            }
+        }
+    }
+    
+    private struct CityCardRow: View {
+        let city: String
+        let index: Int
+        let isEditing: Bool
+        @ObservedObject var favoritesVM: FavoritesViewModel
+        let onSelect: () -> Void
+        
+        var body: some View {
+            HStack(spacing: 12) {
+                Button(action: {
+                    if !isEditing { onSelect() }
+                }) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(city)
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.white)
+                            Text("Натисніть, щоб переглянути")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.75))
+                        }
+                        Spacer()
+                    }
+                    .padding(14)
+                    .background(Color.white.opacity(0.12))
+                    .cornerRadius(10)
+                }
+                .buttonStyle(PlainButtonStyle())
+                if isEditing {
+                    Button(action: {
+        
+                        favoritesVM.removeCity(at: IndexSet(integer: index))
+                    }) {
+                        Text("Видалити")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .background(Color.red.opacity(0.85))
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.vertical, 4)
+            .animation(.none, value: isEditing)
+        }
+    }
+}
+         
