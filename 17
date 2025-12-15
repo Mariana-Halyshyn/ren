@@ -1,0 +1,252 @@
+//
+//  WeatherDetailView.swift
+//  KursovaApp
+//
+//  Created by ІПЗ-31/1 on 10.12.2025.
+//
+
+import SwiftUI
+
+struct WeatherDetailView: View {
+    @ObservedObject var viewModel: WeatherViewModel
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    
+    @State private var cityInput: String = ""
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 0.94, green: 0.98, blue: 1.0),
+                        Color(red: 0.86, green: 0.95, blue: 0.99)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 12) {
+                    
+                    // MARK: - Верхній бар
+                    HStack {
+                        Button {
+                            // кнопка "вибрані" (меню)
+                        } label: {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.title2)
+                                .foregroundColor(.black)
+                        }
+                        
+                        Spacer()
+                        
+                        Text("Прогноз погоди")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.black)
+                        
+                        Spacer()
+                        
+                        Spacer().frame(width: 24)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 18)
+                    
+                    // MARK: - Пошук
+                    HStack(spacing: 10) {
+                        TextField("Введіть назву міста", text: $cityInput)
+                            .padding(10)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                            .foregroundColor(.black)
+                        
+                        Button("Пошук") {
+                            if !cityInput.isEmpty {
+                                viewModel.fetchWeather(city: cityInput, lat: nil, lon: nil)
+                                UIApplication.shared.endEditing()
+                                cityInput = ""
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                    }
+                    .padding(.horizontal)
+                    
+                    // MARK: - Статус
+                    if viewModel.isLoading {
+                        ProgressView("Оновлення даних…")
+                            .padding(.top, 8)
+                    } else if let error = viewModel.errorMessage {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .padding()
+                            .background(Color.white)
+                            .cornerRadius(8)
+                            .padding(.horizontal)
+                    }
+                    
+                    // MARK: - Контент
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 16) {
+                            
+                            // MARK: - Поточна погода
+                            if let weather = viewModel.currentWeather {
+                                VStack(spacing: 10) {
+                                    Text(weather.name)
+                                        .font(.largeTitle)
+                                        .bold()
+                                        .foregroundColor(.black)
+                                    
+                                    Text("\(Int(weather.main.temp))°C")
+                                        .font(.system(size: 64, weight: .thin))
+                                        .foregroundColor(.black)
+                                    
+                                    Text(weather.weather.first?.description.capitalized ?? "")
+                                        .font(.headline)
+                                        .foregroundColor(.black.opacity(0.7))
+                                    
+                                    Button {
+                                        if favoritesVM.favoriteCities.contains(weather.name) {
+                                            if let idx = favoritesVM.favoriteCities.firstIndex(of: weather.name) {
+                                                favoritesVM.removeCity(atIndex: idx)
+                                            }
+                                        } else {
+                                            favoritesVM.addCity(weather.name)
+                                        }
+                                    } label: {
+                                        Image(systemName:
+                                                favoritesVM.favoriteCities.contains(weather.name)
+                                              ? "heart.fill"
+                                              : "heart"
+                                        )
+                                        .foregroundColor(.red)
+                                        .font(.title2)
+                                    }
+                                    .padding(.top, 4)
+                                }
+                                .padding()
+                                .background(Color.white)
+                                .cornerRadius(12)
+                                .padding(.horizontal)
+                            }
+                            
+                            // MARK: - Погодинний прогноз
+                            if !viewModel.forecastItems.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Погодинний прогноз")
+                                        .font(.headline)
+                                        .foregroundColor(.black)
+                                    
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 12) {
+                                            ForEach(viewModel.forecastItems, id: \.dt) { item in
+                                                VStack(spacing: 6) {
+                                                    Text(item.dateHourString)
+                                                        .font(.subheadline)
+                                                        .foregroundColor(.black)
+                                                    
+                                                    Image(systemName: item.weatherIconName)
+                                                        .resizable()
+                                                        .scaledToFit()
+                                                        .frame(width: 28, height: 28)
+                                                        .foregroundColor(.yellow)
+                                                    
+                                                    Text("\(Int(item.main.temp))°C")
+                                                        .font(.subheadline)
+                                                        .foregroundColor(.black)
+                                                }
+                                                .padding(8)
+                                                .background(Color.white)
+                                                .cornerRadius(8)
+                                            }
+                                        }
+                                        .padding(.horizontal)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                            
+                            // MARK: - Опис погоди
+                            if let desc = viewModel.currentWeather?.weather.first?.description {
+                                HStack {
+                                    Text(weatherDescriptionText(desc))
+                                        .foregroundColor(.black.opacity(0.7))
+                                        .font(.body)
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: viewModel.currentWeather?.weather.first?.weatherIconName ?? "cloud")
+                                        .font(.title)
+                                        .foregroundColor(.yellow)
+                                }
+                                .padding()
+                                .background(Color.white)
+                                .cornerRadius(12)
+                                .padding(.horizontal)
+                            }
+                            
+                            // MARK: - 5-денний прогноз (без сьогодні)
+                            if viewModel.dailyForecast.count > 1 {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Прогноз на 5 днів")
+                                        .font(.headline)
+                                        .foregroundColor(.black)
+                                    
+                                    let dailyForecastArray = Array(viewModel.dailyForecast.dropFirst())
+                                    
+                                    ForEach(dailyForecastArray, id: \.dt) { item in
+                                        HStack {
+                                            Text(item.dayOfWeekShort)
+                                                .frame(width: 50, alignment: .leading)
+                                                .foregroundColor(.black)
+                                            
+                                            Image(systemName: item.weatherIconName)
+                                                .foregroundColor(.yellow)
+                                            
+                                            Spacer()
+                                            
+                                            Text("\(Int(item.main.temp))°C")
+                                                .foregroundColor(.black)
+                                        }
+                                        .padding()
+                                        .background(Color.white)
+                                        .cornerRadius(8)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                            
+                            Spacer(minLength: 30)
+                        }
+                        .padding(.top, 10)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            if viewModel.currentWeather == nil {
+                viewModel.requestUserLocation()
+            }
+        }
+        .onTapGesture {
+            UIApplication.shared.endEditing()
+        }
+    }
+}
+
+// MARK: - Текстовий опис погоди
+private func weatherDescriptionText(_ desc: String) -> String {
+    let d = desc.lowercased()
+    
+    if d.contains("clear") { return "Сьогодні сонячно та тепло — ідеальний день для прогулянок." }
+    if d.contains("cloud") { return "На небі хмари, але без опадів — погода спокійна." }
+    if d.contains("rain") { return "Сьогодні дощитиме, не забудьте прихопити парасольку." }
+    if d.contains("storm") { return "Можлива гроза — будьте обережні." }
+    if d.contains("snow") { return "Сніжитиме, на дорогах слизько." }
+    if d.contains("fog") { return "Туманна погода, видимість знижена." }
+    
+    return "Погодні умови стабільні."
+}
