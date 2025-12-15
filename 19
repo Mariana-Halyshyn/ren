@@ -1,0 +1,84 @@
+//
+//  MeteorService.swift
+//  KursovaApp
+//
+//
+не ламаючи код можна тут прибрати пошук по координатах
+import Foundation
+
+class MeteorService {
+
+    private func fetchData<T: Decodable>(endpoint: String, queryItems: [URLQueryItem], completion: @escaping (Result<T, APIError>) -> Void) {
+        var components = URLComponents(string: Constants.baseURL + endpoint)
+        
+        // Основні параметри
+        var allQueryItems = [
+            URLQueryItem(name: "appid", value: Constants.apiKey),
+            URLQueryItem(name: "units", value: Constants.units),
+            URLQueryItem(name: "lang", value: "uk")
+        ]
+        allQueryItems.append(contentsOf: queryItems)
+        components?.queryItems = allQueryItems
+        
+        guard let url = components?.url else {
+            completion(.failure(.invalidURL))
+            return
+        }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            if error != nil {
+                completion(.failure(.other(error!.localizedDescription)))
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 404 {
+                    completion(.failure(.cityNotFound))
+                    return
+                }
+                if httpResponse.statusCode != 200 {
+                    completion(.failure(.other("HTTP Error: \(httpResponse.statusCode)")))
+                    return
+                }
+            }
+            
+            if let data = data {
+                do {
+                    let decoded = try JSONDecoder().decode(T.self, from: data)
+                    completion(.success(decoded))
+                } catch {
+                    completion(.failure(.decodingError))
+                }
+            } else {
+                completion(.failure(.noData))
+            }
+        }.resume()
+    }
+    
+    // --- ПО МІСТУ ---
+    func fetchCurrentWeather(city: String, completion: @escaping (Result<NowWeatherResponse, APIError>) -> Void) {
+        fetchData(endpoint: "weather", queryItems: [URLQueryItem(name: "q", value: city)], completion: completion)
+    }
+    
+    func fetchForecast(city: String, completion: @escaping (Result<ForecastListResponse, APIError>) -> Void) {
+        fetchData(endpoint: "forecast", queryItems: [URLQueryItem(name: "q", value: city)], completion: completion)
+    }
+    
+    // --- ПО КООРДИНАТАХ ---
+    func fetchCurrentWeather(lat: Double, lon: Double, completion: @escaping (Result<NowWeatherResponse, APIError>) -> Void) {
+        fetchData(endpoint: "weather", queryItems: [
+            URLQueryItem(name: "lat", value: "\(lat)"),
+            URLQueryItem(name: "lon", value: "\(lon)")
+        ], completion: completion)
+    }
+    
+    func fetchForecast(lat: Double, lon: Double, completion: @escaping (Result<ForecastListResponse, APIError>) -> Void) {
+        fetchData(endpoint: "forecast", queryItems: [
+            URLQueryItem(name: "lat", value: "\(lat)"),
+            URLQueryItem(name: "lon", value: "\(lon)")
+        ], completion: completion)
+    }
+}
+
+
+а в тут я можу ввести типу координати і мені виведеться погода міста чи я типу ввожу нащву міста і мені його шукажться по координатах
