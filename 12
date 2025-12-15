@@ -1,0 +1,231 @@
+import SwiftUI
+
+struct WeatherDetailView: View {
+    @ObservedObject var viewModel: WeatherViewModel
+    @ObservedObject var favoritesVM: FavoritesViewModel
+    @State private var cityInput: String = ""
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 0.94, green: 0.98, blue: 1.0),
+                        Color(red: 0.86, green: 0.95, blue: 0.99)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 14) {
+
+                    // MARK: - Header
+                    HStack {
+                        Button {
+                            // тут пізніше буде відкриття вибраних
+                        } label: {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.title2)
+                                .foregroundColor(.black)
+                        }
+
+                        Spacer()
+
+                        Text("Прогноз погоди")
+                            .font(.headline)
+                            .foregroundColor(.black)
+
+                        Spacer()
+
+                        Color.clear.frame(width: 24)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 16)
+
+                    // MARK: - Search
+                    HStack(spacing: 8) {
+                        TextField("Введіть назву міста", text: $cityInput)
+                            .padding(10)
+                            .background(Color.white)
+                            .cornerRadius(8)
+
+                        Button("Пошук") {
+                            guard !cityInput.isEmpty else { return }
+                            viewModel.fetchWeather(city: cityInput, lat: nil, lon: nil)
+                            UIApplication.shared.endEditing()
+                            cityInput = ""
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                    }
+                    .padding(.horizontal)
+
+                    // MARK: - Loading / Error
+                    if viewModel.isLoading {
+                        ProgressView("Оновлення...")
+                    } else if let error = viewModel.errorMessage {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .padding()
+                            .background(Color.white)
+                            .cornerRadius(8)
+                            .padding(.horizontal)
+                    }
+
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 18) {
+
+                            // MARK: - Main Weather
+                            if let weather = viewModel.currentWeather {
+                                VStack(spacing: 8) {
+                                    Text(weather.name)
+                                        .font(.title2)
+                                        .bold()
+
+                                    Text("\(Int(weather.main.temp))°C")
+                                        .font(.system(size: 64, weight: .thin))
+
+                                    Text(weather.weather.first?.description.capitalized ?? "")
+                                        .foregroundColor(.gray)
+
+                                    Button {
+                                        if favoritesVM.favoriteCities.contains(weather.name) {
+                                            if let index = favoritesVM.favoriteCities.firstIndex(of: weather.name) {
+                                                favoritesVM.removeCity(atIndex: index)
+                                            }
+                                        } else {
+                                            favoritesVM.addCity(weather.name)
+                                        }
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: favoritesVM.favoriteCities.contains(weather.name)
+                                                  ? "heart.fill"
+                                                  : "heart")
+                                                .foregroundColor(.red)
+                                            Text("Вибрані")
+                                        }
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(Color.white)
+                                        .cornerRadius(10)
+                                    }
+                                }
+                                .padding()
+                                .background(Color.white)
+                                .cornerRadius(14)
+                                .padding(.horizontal)
+                            }
+
+                            // MARK: - Hourly Forecast
+                            if !viewModel.forecastItems.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Погодинний прогноз")
+                                        .font(.headline)
+
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 12) {
+                                            ForEach(viewModel.forecastItems, id: \.dt) { item in
+                                                VStack(spacing: 6) {
+                                                    Text(item.dateHourString)
+                                                        .font(.caption)
+
+                                                    Image(systemName: sfIcon(for: item.weather.first?.main))
+                                                        .font(.title3)
+                                                        .foregroundColor(.orange)
+
+                                                    Text("\(Int(item.main.temp))°C")
+                                                        .font(.subheadline)
+                                                }
+                                                .padding(8)
+                                                .background(Color.white)
+                                                .cornerRadius(10)
+                                            }
+                                        }
+                                        .padding(.horizontal)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+
+                            // MARK: - Description text
+                            if let main = viewModel.currentWeather?.weather.first?.main {
+                                HStack {
+                                    Text(descriptionText(for: main))
+                                        .foregroundColor(.black)
+                                    Spacer()
+                                    Image(systemName: sfIcon(for: main))
+                                        .font(.title2)
+                                        .foregroundColor(.orange)
+                                }
+                                .padding()
+                                .background(Color.white)
+                                .cornerRadius(12)
+                                .padding(.horizontal)
+                            }
+
+                            // MARK: - 5 Day Forecast
+                            if viewModel.dailyForecast.count > 1 {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Прогноз на 5 днів")
+                                        .font(.headline)
+
+                                    ForEach(viewModel.dailyForecast.dropFirst(), id: \.dt) { item in
+                                        HStack {
+                                            Text(item.dayOfWeekShort)
+                                            Spacer()
+                                            Image(systemName: sfIcon(for: item.weather.first?.main))
+                                            Text("\(Int(item.main.temp))°C")
+                                        }
+                                        .padding(8)
+                                        .background(Color.white)
+                                        .cornerRadius(10)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                        }
+                        .padding(.top, 10)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            if viewModel.currentWeather == nil {
+                viewModel.requestUserLocation()
+            }
+        }
+        .onTapGesture {
+            UIApplication.shared.endEditing()
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func sfIcon(for condition: String?) -> String {
+        switch condition {
+        case "Clear": return "sun.max.fill"
+        case "Clouds": return "cloud.fill"
+        case "Rain": return "cloud.rain.fill"
+        case "Drizzle": return "cloud.drizzle.fill"
+        case "Thunderstorm": return "cloud.bolt.rain.fill"
+        case "Snow": return "snow"
+        case "Fog", "Mist", "Haze": return "cloud.fog.fill"
+        default: return "cloud"
+        }
+    }
+
+    private func descriptionText(for condition: String) -> String {
+        switch condition {
+        case "Clear": return "Сьогодні сонячно та тепло — ідеальний день для прогулянок."
+        case "Clouds": return "На небі хмари, але без опадів — погода спокійна."
+        case "Rain": return "Сьогодні дощитиме, не забудьте парасольку."
+        case "Thunderstorm": return "Можлива гроза — уникайте відкритих просторів."
+        case "Snow": return "Сніжитиме, на дорогах слизько."
+        default: return "Погодні умови стабільні."
+        }
+    }
+}
